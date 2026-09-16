@@ -3,3 +3,5 @@
 lightgbm>=4.5
 optuna>=4.0
 xgboost>=2.1
+python-telegram-bot>=21.0
+gymnasium>=1.0
