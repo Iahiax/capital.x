@@ -1,90 +1,106 @@
 # strategy.py
 """
-ملف الاستراتيجية هنا ليس مجرد مؤشرات،
-بل هو واجهة للذكاء الاصطناعي الذي يبني قرارات التداول.
-
-الفكرة:
-- init_ai_model(history_df): تهيئة النموذج (تحميل وزنات، تدريب، إلخ)
-- generate_signal(): قراءة حالة السوق الآن + استدعاء النموذج + إنتاج إشارة
+واجهة الاستراتيجية الذكية:
+- تهيئة نماذج الذكاء الاصطناعي باستخدام البيانات التاريخية
+- استخدام نماذج Regime + Meta-Model لإنتاج إشارات تداول حية
 """
 
-import random
+import pandas as pd
+from typing import Tuple, Dict, Optional
 
-# مكان تخزين النموذج أو حالته
-AI_MODEL = None
-CURRENT_REGIME = None  # ترند / تذبذب / خبر قوي / إلخ
+from features import create_pro_features
+from model import train_regime_models, add_ai_prob, train_meta_model, load_meta_model
+from signals import generate_signals
+
+AI_MODELS = {
+    "regime_models": None,
+    "meta_model": None,
+}
+LAST_FEATURES_DF: Optional[pd.DataFrame] = None
 
 
-def init_ai_model(history_df):
+def init_ai_model(history_df: pd.DataFrame) -> None:
     """
-    هنا تربط نموذجك الفعلي:
-    - تحميل وزنات من ملف
-    - تدريب سريع على البيانات التاريخية
-    - بناء ميزات (features)
-    - بناء نموذج RL أو ML
-    الآن سأضعها كـ placeholder، وأنت تربطها لاحقًا بنموذجك الحقيقي.
+    تهيئة نموذج الذكاء الاصطناعي:
+    - بناء الميزات
+    - تدريب نماذج Regime
+    - إضافة احتمالات AI
+    - تدريب Meta-Model
+    - تحميله للاستخدام الحي
     """
-    global AI_MODEL
+    global AI_MODELS, LAST_FEATURES_DF
+
     print("🧠 تهيئة نموذج الذكاء الاصطناعي بالبيانات التاريخية...")
-    # مثال: AI_MODEL = YourModelClass(...)
-    # AI_MODEL.fit(history_df)
-    AI_MODEL = "DUMMY_MODEL"  # مجرد علامة أن النموذج جاهز
-    print("✅ تم تهيئة النموذج (Placeholder – اربطه بنموذجك الحقيقي لاحقًا)")
+
+    # بناء الميزات
+    df_feat = create_pro_features(history_df)
+
+    # تدريب نماذج Regime
+    regime_models = train_regime_models(df_feat)
+
+    # إضافة احتمالات AI
+    df_feat = add_ai_prob(df_feat, regime_models)
+
+    # تدريب Meta-Model
+    meta_model = train_meta_model(df_feat)
+
+    # تحميل Meta-Model (إذا كان محفوظًا)
+    meta_model = load_meta_model()
+
+    AI_MODELS["regime_models"] = regime_models
+    AI_MODELS["meta_model"] = meta_model
+    LAST_FEATURES_DF = df_feat
+
+    print("✅ تم تهيئة نماذج الذكاء الاصطناعي")
 
 
-def detect_regime():
+def generate_signal() -> Tuple[Optional[str], Dict]:
     """
-    كشف حالة السوق (Regime Detection)
-    يمكنك لاحقًا ربطها بنموذج حقيقي:
-    - ترند قوي
-    - تذبذب
-    - خبر قوي
-    الآن سنضعها كـ placeholder.
-    """
-    regimes = ["TREND", "RANGE", "NEWS_RISK"]
-    regime = random.choice(regimes)
-    return regime
-
-
-def generate_signal():
-    """
-    هذه هي الدالة التي يستدعيها trade_engine:
-    - تقرأ حالة السوق (Regime)
-    - تستدعي نموذج الذكاء الاصطناعي (AI_MODEL)
+    إنتاج إشارة تداول حية:
+    - تستخدم آخر بيانات الميزات (LAST_FEATURES_DF)
+    - تستخدم meta_model لتقييم الإشارة
     - تعيد:
         - signal: "BUY" / "SELL" / None
-        - meta: dict يحتوي stop_pips, pip_value, إلخ
+        - meta: dict يحتوي:
+            - stop_pips
+            - pip_value
+            - regime
+            - score
     """
 
-    global CURRENT_REGIME
+    global AI_MODELS, LAST_FEATURES_DF
 
-    if AI_MODEL is None:
-        print("⚠️ النموذج غير مهيأ بعد – لا توجد إشارة")
+    if AI_MODELS["meta_model"] is None or LAST_FEATURES_DF is None:
+        print("⚠️ نماذج الذكاء الاصطناعي غير مهيأة بعد – لا توجد إشارة")
         return None, {}
 
-    CURRENT_REGIME = detect_regime()
+    # نفترض أن generate_signals يمكن أن يعمل على آخر صف واحد
+    # أو على df_feat كامل ويعطي إشارات، نأخذ آخر إشارة
+    signals_df = generate_signals(
+        LAST_FEATURES_DF,
+        news_blackout=None,
+        meta_model=AI_MODELS["meta_model"],
+    )
 
-    # هنا منطق بسيط placeholder، استبدله بمنطق نموذجك الفعلي
-    if CURRENT_REGIME == "TREND":
-        # مثال: نموذجك قرر شراء
-        signal = random.choice(["BUY", "SELL"])
-        stop_pips = 30
-    elif CURRENT_REGIME == "RANGE":
-        # مثال: نموذجك يفضل سكالبينغ
-        signal = random.choice(["BUY", "SELL"])
-        stop_pips = 15
-    elif CURRENT_REGIME == "NEWS_RISK":
-        # لا تداول أثناء الأخبار
-        print("📰 حالة السوق: NEWS_RISK – لا توجد إشارة تداول")
+    if signals_df.empty:
+        print("⚠️ لا توجد إشارات من النموذج")
         return None, {}
-    else:
-        signal = None
-        stop_pips = 20
+
+    last_signal = signals_df.iloc[-1]
+
+    signal_type = last_signal["Type"]  # نفترض "BUY" أو "SELL"
+    score = last_signal.get("Score", 0.0)
+    atr = last_signal.get("ATR", 0.001)
+
+    # منطق تحويل Score + ATR إلى stop_pips و pip_value
+    stop_pips = atr * (1.0 - min(score / 200.0, 0.5)) * 10000
+    pip_value = 0.0001
 
     meta = {
-        "regime": CURRENT_REGIME,
-        "stop_pips": stop_pips,
-        "pip_value": 0.0001
+        "regime": last_signal.get("Regime", "UNKNOWN"),
+        "stop_pips": max(stop_pips, 10.0),
+        "pip_value": pip_value,
+        "score": score,
     }
 
-    return signal, meta
+    return signal_type, meta
