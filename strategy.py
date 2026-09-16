@@ -1,8 +1,16 @@
 # strategy.py
 """
-واجهة الاستراتيجية الذكية:
-- تهيئة نماذج الذكاء الاصطناعي باستخدام البيانات التاريخية
-- استخدام نماذج Regime + Meta-Model لإنتاج إشارات تداول حية
+استراتيجية التداول الحي بالذكاء الاصطناعي:
+- تستخدم نفس البايبلاين البحثي:
+    - create_pro_features
+    - train_regime_models
+    - add_ai_prob
+    - train_meta_model
+    - load_meta_model
+    - generate_signals
+- لكن بدل أن تنتهي بباك تست، تنتج إشارة حيّة:
+    - BUY / SELL / None
+    - مع Meta: stop_pips, pip_value, score, regime
 """
 
 import pandas as pd
@@ -12,23 +20,23 @@ from features import create_pro_features
 from model import train_regime_models, add_ai_prob, train_meta_model, load_meta_model
 from signals import generate_signals
 
-AI_MODELS = {
+AI_STATE = {
     "regime_models": None,
     "meta_model": None,
+    "features_df": None,
 }
-LAST_FEATURES_DF: Optional[pd.DataFrame] = None
 
 
 def init_ai_model(history_df: pd.DataFrame) -> None:
     """
-    تهيئة نموذج الذكاء الاصطناعي:
+    تهيئة نموذج الذكاء الاصطناعي باستخدام البيانات التاريخية:
     - بناء الميزات
     - تدريب نماذج Regime
     - إضافة احتمالات AI
     - تدريب Meta-Model
     - تحميله للاستخدام الحي
     """
-    global AI_MODELS, LAST_FEATURES_DF
+    global AI_STATE
 
     print("🧠 تهيئة نموذج الذكاء الاصطناعي بالبيانات التاريخية...")
 
@@ -47,17 +55,17 @@ def init_ai_model(history_df: pd.DataFrame) -> None:
     # تحميل Meta-Model (إذا كان محفوظًا)
     meta_model = load_meta_model()
 
-    AI_MODELS["regime_models"] = regime_models
-    AI_MODELS["meta_model"] = meta_model
-    LAST_FEATURES_DF = df_feat
+    AI_STATE["regime_models"] = regime_models
+    AI_STATE["meta_model"] = meta_model
+    AI_STATE["features_df"] = df_feat
 
-    print("✅ تم تهيئة نماذج الذكاء الاصطناعي")
+    print("✅ تم تهيئة نماذج الذكاء الاصطناعي للتداول الحي")
 
 
 def generate_signal() -> Tuple[Optional[str], Dict]:
     """
-    إنتاج إشارة تداول حية:
-    - تستخدم آخر بيانات الميزات (LAST_FEATURES_DF)
+    إنتاج إشارة تداول حيّة:
+    - تستخدم آخر صف من df_feat
     - تستخدم meta_model لتقييم الإشارة
     - تعيد:
         - signal: "BUY" / "SELL" / None
@@ -68,39 +76,46 @@ def generate_signal() -> Tuple[Optional[str], Dict]:
             - score
     """
 
-    global AI_MODELS, LAST_FEATURES_DF
+    global AI_STATE
 
-    if AI_MODELS["meta_model"] is None or LAST_FEATURES_DF is None:
+    meta_model = AI_STATE["meta_model"]
+    df_feat = AI_STATE["features_df"]
+
+    if meta_model is None or df_feat is None or df_feat.empty:
         print("⚠️ نماذج الذكاء الاصطناعي غير مهيأة بعد – لا توجد إشارة")
         return None, {}
 
-    # نفترض أن generate_signals يمكن أن يعمل على آخر صف واحد
-    # أو على df_feat كامل ويعطي إشارات، نأخذ آخر إشارة
+    # توليد الإشارات باستخدام نفس المنطق البحثي
     signals_df = generate_signals(
-        LAST_FEATURES_DF,
-        news_blackout=None,
-        meta_model=AI_MODELS["meta_model"],
+        df_feat,
+        news_blackout=None,   # يمكنك لاحقًا ربط news_filter هنا
+        meta_model=meta_model,
     )
 
     if signals_df.empty:
         print("⚠️ لا توجد إشارات من النموذج")
         return None, {}
 
-    last_signal = signals_df.iloc[-1]
+    # نأخذ آخر إشارة كإشارة حيّة
+    s = signals_df.iloc[-1]
 
-    signal_type = last_signal["Type"]  # نفترض "BUY" أو "SELL"
-    score = last_signal.get("Score", 0.0)
-    atr = last_signal.get("ATR", 0.001)
+    signal_type = s["Type"]          # "BUY" أو "SELL"
+    score = s.get("Score", 0.0)
+    atr = s.get("ATR", 0.001)
+    regime = s.get("Regime", "UNKNOWN")
 
-    # منطق تحويل Score + ATR إلى stop_pips و pip_value
-    stop_pips = atr * (1.0 - min(score / 200.0, 0.5)) * 10000
+    # تحويل Score + ATR إلى stop_pips
+    # نفس المنطق الذي كنت تستخدمه في main.py القديم تقريبًا
+    sl = atr * (1.0 - min(score / 200.0, 0.5))
+    stop_pips = max(sl * 10000, 10.0)   # تحويل إلى نقاط تقريبية
     pip_value = 0.0001
 
     meta = {
-        "regime": last_signal.get("Regime", "UNKNOWN"),
-        "stop_pips": max(stop_pips, 10.0),
+        "regime": regime,
+        "stop_pips": stop_pips,
         "pip_value": pip_value,
         "score": score,
+        "atr": atr,
     }
 
     return signal_type, meta
