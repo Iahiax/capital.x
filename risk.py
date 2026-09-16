@@ -11,7 +11,10 @@ def apply_risk_management(signals_df):
         sl = atr * 0.7
         tp = atr * 1.5
 
-        risk_amount = INITIAL_EQUITY * RISK_PER_TRADE
+        base_risk = INITIAL_EQUITY * RISK_PER_TRADE
+        quality_factor = min(max(s['Score'] / 100.0, 0.5), 1.5)
+        risk_amount = base_risk * quality_factor
+
         position_size = risk_amount / sl if sl > 0 else 0
 
         trades.append({
@@ -20,7 +23,8 @@ def apply_risk_management(signals_df):
             'Entry': s['Price'],
             'SL': sl,
             'TP': tp,
-            'Size': position_size
+            'Size': position_size,
+            'Score': s['Score']
         })
 
     return pd.DataFrame(trades)
