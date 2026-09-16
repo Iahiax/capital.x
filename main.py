@@ -181,10 +181,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.live_bot:
-        # تشغيل نظام التداول الحي + تيليجرام
         telegram_main()
     else:
-        # تشغيل بايبلاين البحث التداولي كما كان سابقًا
         if args.trials < 1:
             parser.error("--trials must be at least 1")
         research_main(sample=args.sample, trials=args.trials)
