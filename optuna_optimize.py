@@ -1,10 +1,14 @@
 # optuna_optimize.py
 
-import optuna
 import pandas as pd
 from signals import compute_signal_score
 from risk_engine import RiskEngine
 from backtest import run_backtest
+
+try:
+    import optuna
+except ImportError:
+    optuna = None
 
 
 def objective(trial, df_feat, df_prices):
@@ -100,6 +104,18 @@ def objective(trial, df_feat, df_prices):
 
 
 def run_optuna(df_feat, df_prices, n_trials=30):
+    if optuna is None:
+        print("Optuna is not installed; using safe default filter parameters.")
+        return {
+            "ai_long": 0.8,
+            "ai_short": 0.2,
+            "rvol_min": 1.2,
+            "shock_max": 1.5,
+            "noise_max": 1.5,
+            "mq_min": 0.0,
+            "score_min": 60.0,
+        }
+
     study = optuna.create_study(direction="maximize")
     study.optimize(lambda trial: objective(trial, df_feat, df_prices), n_trials=n_trials)
     print("Best params:", study.best_params)

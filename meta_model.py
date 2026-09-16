@@ -28,6 +28,10 @@ class MetaDecisionModel:
         - Target_3m
         """
 
+        if "Score" not in df:
+            df = df.copy()
+            df["Score"] = self._score_frame(df)
+
         X = np.column_stack([
             df['AI_Prob'].values,
             df['Score'].values,
@@ -37,6 +41,8 @@ class MetaDecisionModel:
 
         y = df['Target_3m'].values
 
+        if np.unique(y).size < 2:
+            raise ValueError("Meta model needs both positive and negative targets.")
         self.model.fit(X, y)
 
     def predict_prob(self, ai_prob, score, regime, mq):
@@ -47,7 +53,23 @@ class MetaDecisionModel:
         return self.model.predict_proba(x)[0, 1]
 
     def save(self, path="models/meta_model.bin"):
+        import os
+
+        os.makedirs(os.path.dirname(str(path)) or ".", exist_ok=True)
         joblib.dump(self.model, path)
 
     def load(self, path="models/meta_model.bin"):
         self.model = joblib.load(path)
+
+    @staticmethod
+    def _score_frame(df):
+        return (
+            df["AI_Prob"] * 50
+            + (df["TrendStrength"] / (df["ATR"] + 1e-6)) * 10
+            + df["BuyPressure"] * 10
+            + df["RVOL"] * 10
+            - df["ShockIndex"] * 10
+            - df["NoiseIndex"] * 10
+            + df["AggressiveBuy"] * 5
+            - df["AggressiveSell"] * 5
+        )

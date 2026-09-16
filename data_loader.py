@@ -1,15 +1,21 @@
-# data_loader.py
+"""Capital.com session handling and historical price loading."""
 
-import requests
-import pandas as pd
 import time
+
+import numpy as np
+import pandas as pd
+import requests
+
 from config import (
     API_KEY,
+    BATCH_SIZE,
     EMAIL,
-    PASSWORD,
     EPIC,
+    HISTORY_DAYS,
+    PASSWORD,
     RESOLUTION,
-    USE_DEMO
+    USE_DEMO,
+    validate_capital_credentials,
 )
 
 BASE_URL = (
@@ -19,6 +25,7 @@ BASE_URL = (
 )
 
 def create_session():
+    validate_capital_credentials()
     url = f"{BASE_URL}/session"
 
     headers = {
@@ -32,20 +39,31 @@ def create_session():
         "encryptedPassword": False
     }
 
-    r = requests.post(url, headers=headers, json=data)
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=30)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Capital.com session request failed: {exc}") from exc
 
     if r.status_code != 200:
-        print("❌ error.invalid.details:", r.text)
-        raise Exception("فشل تسجيل الدخول")
+        try:
+            error_code = r.json().get("errorCode", "unknown")
+        except ValueError:
+            error_code = "unknown"
+        raise RuntimeError(
+            f"Capital.com session rejected the credentials (HTTP {r.status_code}, "
+            f"{error_code}). Check the API password and demo/live endpoint."
+        )
 
-    CST = r.headers.get("CST")
-    XST = r.headers.get("X-SECURITY-TOKEN")
+    cst = r.headers.get("CST")
+    security_token = r.headers.get("X-SECURITY-TOKEN")
 
-    if not CST or not XST:
-        raise Exception("❌ لم يتم استلام الرموز")
+    if not cst or not security_token:
+        raise RuntimeError(
+            "Capital.com did not return both CST and X-SECURITY-TOKEN headers."
+        )
 
-    print("✅ تم تسجيل الدخول بنجاح")
-    return CST, XST
+    print("Capital.com session created successfully.")
+    return cst, security_token
 
 
 def fetch_batch(CST, XST, start, end):
@@ -54,26 +72,32 @@ def fetch_batch(CST, XST, start, end):
     headers = {
         "X-CAP-API-KEY": API_KEY,
         "CST": CST,
-        "X-SECURITY-TOKEN": XST
+        "X-SECURITY-TOKEN": XST,
     }
 
     params = {
         "from": start,
         "to": end,
-        "pageSize": 1000
+        "pageSize": BATCH_SIZE,
     }
 
-    r = requests.get(url, headers=headers, params=params)
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=30)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Capital.com price request failed: {exc}") from exc
 
     if r.status_code != 200:
-        print("❌ API Error:", r.text)
-        return pd.DataFrame()
+        raise RuntimeError(
+            f"Capital.com price request failed with HTTP {r.status_code}."
+        )
 
-    data = r.json()
+    try:
+        data = r.json()
+    except ValueError as exc:
+        raise RuntimeError("Capital.com returned invalid JSON for price data.") from exc
 
     if "prices" not in data:
-        print("⚠️ لا يوجد حقل prices")
-        return pd.DataFrame()
+        raise RuntimeError("Capital.com response did not contain a prices field.")
 
     rows = []
     for item in data["prices"]:
@@ -81,7 +105,7 @@ def fetch_batch(CST, XST, start, end):
             continue
 
         rows.append({
-            "Time": pd.to_datetime(item["snapshotTime"]),
+            "Time": pd.to_datetime(item["snapshotTime"], utc=True),
             "Open": item["openPrice"]["bid"],
             "High": item["highPrice"]["bid"],
             "Low": item["lowPrice"]["bid"],
@@ -89,24 +113,26 @@ def fetch_batch(CST, XST, start, end):
             "Volume": item.get("lastTradedVolume", 0)
         })
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows).drop_duplicates("Time")
 
 
 def load_full_year_data():
-    print("🚀 بدء جلب بيانات سنة كاملة")
+    print(f"Loading {HISTORY_DAYS} days of Capital.com price data.")
 
     CST, XST = create_session()
 
-    end = pd.Timestamp.utcnow()
-    start = end - pd.Timedelta(days=365)
+    end = pd.Timestamp.now(tz="UTC")
+    start = end - pd.Timedelta(days=HISTORY_DAYS)
 
     all_data = []
     current = start
 
     while current < end:
-        batch_end = current + pd.Timedelta(days=7)
+        # The API page size is limited; half-day windows keep minute data
+        # within one response and avoid silently truncating each batch.
+        batch_end = min(current + pd.Timedelta(hours=12), end)
 
-        print(f"📦 جلب البيانات من {current} إلى {batch_end}")
+        print(f"Loading prices from {current} to {batch_end}")
 
         df_batch = fetch_batch(
             CST, XST,
@@ -118,17 +144,49 @@ def load_full_year_data():
             all_data.append(df_batch)
 
         current = batch_end
-        time.sleep(0.5)
+        time.sleep(1.05)
 
     if not all_data:
-        raise Exception("❌ لم يتم جلب أي بيانات")
+        raise RuntimeError("Capital.com returned no historical price data.")
 
     df = pd.concat(all_data, ignore_index=True)
 
     if "Time" not in df.columns:
-        raise Exception("❌ عمود Time غير موجود")
+        raise RuntimeError("Historical price data is missing the Time column.")
 
     df = df.drop_duplicates().set_index("Time").sort_index()
 
-    print("✅ تم تحميل البيانات – عدد الشموع:", len(df))
+    print("Loaded candles:", len(df))
     return df
+
+
+def generate_sample_data(rows: int = 3000, seed: int = 7) -> pd.DataFrame:
+    """Create deterministic minute candles for safe local smoke tests."""
+
+    if rows < 400:
+        raise ValueError("Sample data requires at least 400 rows.")
+
+    rng = np.random.default_rng(seed)
+    times = pd.date_range(
+        end=pd.Timestamp.now(tz="UTC").floor("min"),
+        periods=rows,
+        freq="min",
+    )
+    returns = rng.normal(0, 0.00025, rows)
+    close = 1.08 + np.cumsum(returns)
+    open_price = np.concatenate(([close[0]], close[:-1]))
+    spread = rng.uniform(0.00005, 0.00035, rows)
+    high = np.maximum(open_price, close) + spread
+    low = np.minimum(open_price, close) - spread
+    volume = rng.integers(80, 220, rows)
+
+    return pd.DataFrame(
+        {
+            "Open": open_price,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Volume": volume,
+        },
+        index=times,
+    )

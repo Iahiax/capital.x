@@ -39,8 +39,8 @@ def add_market_quality(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
-    df_5m = df['Close'].resample('5T').ohlc()
-    df_15m = df['Close'].resample('15T').ohlc()
+    df_5m = df['Close'].resample('5min').ohlc()
+    df_15m = df['Close'].resample('15min').ohlc()
 
     df_5m['EMA_5m_20'] = df_5m['close'].ewm(span=20).mean()
     df_15m['EMA_15m_20'] = df_15m['close'].ewm(span=20).mean()

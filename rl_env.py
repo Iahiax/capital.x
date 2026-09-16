@@ -1,6 +1,15 @@
 # rl_env.py
 
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    try:
+        import gym
+    except ImportError as exc:
+        raise ImportError(
+            "TradingEnv requires optional gymnasium or gym. "
+            "Install one separately to use rl_env.py."
+        ) from exc
 import numpy as np
 
 class TradingEnv(gym.Env):
@@ -14,9 +23,11 @@ class TradingEnv(gym.Env):
             low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32
         )
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
+        if seed is not None:
+            super().reset(seed=seed)
         self.idx = 0
-        return self._get_obs()
+        return self._get_obs(), {}
 
     def step(self, action):
         reward = 0
@@ -31,7 +42,7 @@ class TradingEnv(gym.Env):
         if self.idx >= len(self.df) - 2:
             done = True
 
-        return self._get_obs(), reward, done, {}
+        return self._get_obs(), reward, done, False, {}
 
     def _get_obs(self):
         row = self.df.iloc[self.idx]

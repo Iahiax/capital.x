@@ -1,0 +1,5 @@
+# Optional faster/stronger model and optimizer implementations.
+# The core pipeline falls back to scikit-learn when these are unavailable.
+lightgbm>=4.5
+optuna>=4.0
+xgboost>=2.1

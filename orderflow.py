@@ -18,8 +18,9 @@ def add_orderflow_features(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    # جسم الشمعة
-    df['Body'] = (df['Close'] - df['Open']).abs()
+    # Keep both signed and absolute bodies. AggressiveSell must use direction.
+    df['SignedBody'] = df['Close'] - df['Open']
+    df['Body'] = df['SignedBody'].abs()
 
     # الأذيال
     df['UpperWick'] = df['High'] - df[['Close', 'Open']].max(axis=1)
@@ -35,7 +36,7 @@ def add_orderflow_features(df: pd.DataFrame) -> pd.DataFrame:
     ).astype(int)
 
     df['AggressiveSell'] = (
-        (df['Body'] < 0) &
+        (df['SignedBody'] < 0) &
         (df['UpperWick'] > df['LowerWick'])
     ).astype(int)
 

@@ -1,7 +1,9 @@
-# main.py
+"""Run the trading research pipeline in live or safe sample-data mode."""
+
+import argparse
 
 from config import INITIAL_EQUITY
-from data_loader import load_full_year_data
+from data_loader import generate_sample_data, load_full_year_data
 from features import create_pro_features
 from model import train_regime_models, add_ai_prob, train_meta_model, load_meta_model
 from news_filter import fetch_forex_news, build_news_blackout
@@ -12,8 +14,8 @@ from optuna_optimize import run_optuna
 from daily_analyzer import analyze_daily
 
 
-def main():
-    df = load_full_year_data()
+def main(sample=False, trials=5):
+    df = generate_sample_data() if sample else load_full_year_data()
     df_feat = create_pro_features(df)
 
     models = train_regime_models(df_feat)
@@ -24,8 +26,8 @@ def main():
     df_news = fetch_forex_news()
     news_blackout = build_news_blackout(df, df_news)
 
-    best_params = run_optuna(df_feat, df, n_trials=20)
-    print("✅ تم تحسين الفلاتر باستخدام Optuna:", best_params)
+    best_params = run_optuna(df_feat, df, n_trials=trials)
+    print("Optimized filters:", best_params)
 
     meta_model = load_meta_model()
 
@@ -74,4 +76,19 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--sample",
+        action="store_true",
+        help="Use deterministic local candles instead of calling Capital.com.",
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=5,
+        help="Number of Optuna trials (use 1 for a quick smoke test).",
+    )
+    args = parser.parse_args()
+    if args.trials < 1:
+        parser.error("--trials must be at least 1")
+    main(sample=args.sample, trials=args.trials)

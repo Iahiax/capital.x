@@ -46,7 +46,7 @@ def generate_signals(df_feat: pd.DataFrame, news_blackout=None, meta_model: Meta
         if not (8 <= hour <= 11 or 14 <= hour <= 17):
             continue
 
-        if news_blackout is not None and news_blackout.loc[idx]:
+        if news_blackout is not None and bool(news_blackout.reindex([idx], fill_value=False).iloc[0]):
             continue
 
         if mq < 0.0:
