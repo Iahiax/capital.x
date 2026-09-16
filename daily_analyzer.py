@@ -1,6 +1,5 @@
-# daily_analyzer.py
-
 import pandas as pd
+
 
 def analyze_daily(trades_df):
     if trades_df.empty:
