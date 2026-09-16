@@ -43,8 +43,7 @@ def compute_regime_and_quality(df):
 
     df['Regime'] = regimes
 
-    # MarketQuality
-    df['MarketQuality'] =
+    df['MarketQuality'] = \
         (df['TrendStrength'] / (df['ATR'] + 1e-6)) * 0.4 + \
         df['RVOL'] * 0.3 - \
         df['NoiseIndex'] * 0.3
