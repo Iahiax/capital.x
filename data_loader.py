@@ -1,5 +1,4 @@
 # data_loader.py
-# جلب البيانات من Capital.com بالطريقة الرسمية حسب التوثيق
 
 import requests
 import pandas as pd
@@ -36,7 +35,7 @@ def create_session():
     r = requests.post(url, headers=headers, json=data)
 
     if r.status_code != 200:
-        print("❌ خطأ في تسجيل الدخول:", r.text)
+        print("❌ error.invalid.details:", r.text)
         raise Exception("فشل تسجيل الدخول")
 
     CST = r.headers.get("CST")
