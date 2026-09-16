@@ -5,3 +5,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 models/*.bin
+*.sqlite3
+*.log
+.ruff_cache/
