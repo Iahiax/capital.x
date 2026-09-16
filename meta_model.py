@@ -7,8 +7,8 @@
 # - MarketQuality (جودة السوق)
 # ويقرر: هل ندخل الصفقة أم لا؟
 
-import numpy as np
 import joblib
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 
 
@@ -28,6 +28,12 @@ class MetaDecisionModel:
         - Target_3m
         """
 
+        df = df.replace([np.inf, -np.inf], np.nan).dropna(
+            subset=["AI_Prob", "Regime", "MarketQuality", "Target_3m"]
+        )
+        if df.empty:
+            raise ValueError("Meta model has no complete training rows.")
+
         if "Score" not in df:
             df = df.copy()
             df["Score"] = self._score_frame(df)
@@ -39,7 +45,7 @@ class MetaDecisionModel:
             df['MarketQuality'].values
         ])
 
-        y = df['Target_3m'].values
+        y = df['Target_3m'].astype(int).values
 
         if np.unique(y).size < 2:
             raise ValueError("Meta model needs both positive and negative targets.")
@@ -52,6 +58,10 @@ class MetaDecisionModel:
         x = np.array([[ai_prob, score, regime, mq]])
         return self.model.predict_proba(x)[0, 1]
 
+    def predict_prob_frame(self, ai_prob, score, regime, mq):
+        x = np.column_stack([ai_prob, score, regime, mq])
+        return self.model.predict_proba(x)[:, 1]
+
     def save(self, path="models/meta_model.bin"):
         import os
 
@@ -63,13 +73,25 @@ class MetaDecisionModel:
 
     @staticmethod
     def _score_frame(df):
+        is_short = df["Regime"] == -1
+        directional_ai = np.where(is_short, 1 - df["AI_Prob"], df["AI_Prob"])
+        directional_trend = np.where(is_short, -df["TrendStrength"], df["TrendStrength"])
+        directional_pressure = np.where(
+            is_short, df["SellPressure"], df["BuyPressure"]
+        )
+        directional_aggression = np.where(
+            is_short, df["AggressiveSell"], df["AggressiveBuy"]
+        )
+        opposite_aggression = np.where(
+            is_short, df["AggressiveBuy"], df["AggressiveSell"]
+        )
         return (
-            df["AI_Prob"] * 50
-            + (df["TrendStrength"] / (df["ATR"] + 1e-6)) * 10
-            + df["BuyPressure"] * 10
+            directional_ai * 50
+            + (directional_trend / (df["ATR"] + 1e-6)) * 10
+            + directional_pressure * 10
             + df["RVOL"] * 10
             - df["ShockIndex"] * 10
             - df["NoiseIndex"] * 10
-            + df["AggressiveBuy"] * 5
-            - df["AggressiveSell"] * 5
+            + directional_aggression * 5
+            - opposite_aggression * 5
         )
