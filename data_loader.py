@@ -1,12 +1,11 @@
 # data_loader.py
-# جلب البيانات من Capital.com بالطريقة الرسمية حسب شرح الدعم الفني
+# جلب البيانات من Capital.com بالطريقة الرسمية حسب التوثيق
 
 import requests
 import pandas as pd
 import time
 from config import (
     API_KEY,
-    API_KEY_PASSWORD,
     EMAIL,
     PASSWORD,
     EPIC,
@@ -37,9 +36,7 @@ def create_session():
     data = {
         "identifier": EMAIL,
         "password": PASSWORD,
-        "encryptedPassword": False,
-        "apiKey": API_KEY,
-        "apiKeyPassword": API_KEY_PASSWORD
+        "encryptedPassword": False
     }
 
     r = requests.post(url, headers=headers, json=data)
