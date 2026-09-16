@@ -27,3 +27,6 @@ ai_trading_system/
     ├── xgb_range.bin
     ├── xgb_chaos.bin
     ├── meta_model.bin
+
+
+pip install pandas numpy xgboost lightgbm optuna joblib requests gym
