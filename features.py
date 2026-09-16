@@ -1,28 +1,75 @@
+#```python
 # features.py
 
 import pandas as pd
 import numpy as np
 
+# =========================
+# Kalman Filter
+# =========================
 def kalman_filter(series, process_variance=1e-5, measurement_variance=1e-2):
     n = len(series)
     xhat = np.zeros(n)
     P = np.zeros(n)
     xhat[0] = series.iloc[0]
     P[0] = 1.0
+
     Q = process_variance
     R = measurement_variance
+
     for k in range(1, n):
-        xhat_minus = xhat[k-1]
-        P_minus = P[k-1] + Q
+        xhat_minus = xhat[k - 1]
+        P_minus = P[k - 1] + Q
+
         K = P_minus / (P_minus + R)
         xhat[k] = xhat_minus + K * (series.iloc[k] - xhat_minus)
         P[k] = (1 - K) * P_minus
+
     return pd.Series(xhat, index=series.index)
 
+
+# =========================
+# Regime Detection
+# =========================
+def compute_regime(df):
+    df = df.copy()
+
+    # TrendStrength موجود مسبقاً لكن نضمنه
+    df['TrendStrength'] = df['EMA_20'] - df['EMA_100']
+
+    # قياس التذبذب والضوضاء
+    df['Range'] = df['High'] - df['Low']
+    df['Range_Mean'] = df['Range'].rolling(50).mean()
+    df['NoiseIndex'] = df['Range'] / (df['Range_Mean'] + 1e-6)
+
+    regimes = []
+    for i, row in df.iterrows():
+        ts = row['TrendStrength']
+        noise = row['NoiseIndex']
+        atr = row['ATR']
+
+        if abs(ts) > atr * 0.5 and noise < 1.2:
+            # ترند واضح
+            regimes.append(1 if ts > 0 else -1)
+        elif noise < 1.5:
+            # تذبذب خفيف
+            regimes.append(0)
+        else:
+            # فوضى / ضوضاء عالية
+            regimes.append(2)  # 2 = تجنب التداول
+
+    df['Regime'] = regimes
+    return df
+
+
+# =========================
+# Main Feature Builder
+# =========================
 def create_pro_features(df):
     df = df.copy()
 
-    df['EMA_20']  = df['Close'].ewm(span=20).mean()
+    # -------- اتجاه وزخم أساسي --------
+    df['EMA_20'] = df['Close'].ewm(span=20).mean()
     df['EMA_100'] = df['Close'].ewm(span=100).mean()
     df['EMA_300'] = df['Close'].ewm(span=300).mean()
 
@@ -35,27 +82,45 @@ def create_pro_features(df):
 
     df['TrendStrength'] = df['EMA_20'] - df['EMA_100']
 
-    df['Kalman_Fast'] = kalman_filter(df['Close'], 1e-4, 1e-2)
+    # -------- Kalman --------
+    df['Kalman_Fast'] = kalman_filter(df['Close'], process_variance=1e-4, measurement_variance=1e-2)
     df['Kalman_Fast_Slope'] = df['Kalman_Fast'].diff()
 
-    df['BuyPressure']  = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 1e-6)
+    # -------- ضغط شراء/بيع --------
+    df['BuyPressure'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 1e-6)
     df['SellPressure'] = (df['High'] - df['Close']) / (df['High'] - df['Low'] + 1e-6)
 
+    # -------- حجم نسبي --------
     df['RVOL'] = df['Volume'] / (df['Volume'].rolling(20).mean() + 1e-6)
 
+    # -------- صدمات السعر --------
     df['ShockIndex'] = np.abs(df['Close'].diff()) / (df['ATR'] + 1e-6)
 
+    # -------- Divergence ذكي --------
     df['SmartDiv'] = (df['MACD'] - df['MACD_Signal']) * df['TrendStrength']
 
+    # -------- ضغط/انضغاط السعر --------
     df['Compression'] = (df['High'] - df['Low']).rolling(10).mean()
 
+    # -------- ضوضاء السوق --------
+    df['Range'] = df['High'] - df['Low']
+    df['Range_Mean'] = df['Range'].rolling(50).mean()
+    df['NoiseIndex'] = df['Range'] / (df['Range_Mean'] + 1e-6)
+
+    # -------- الوقت --------
     df['Hour'] = df.index.hour
     df['Minute'] = df.index.minute
 
+    # -------- الهدف (Target) --------
     df['Target_3m'] = (df['Close'].shift(-3) > df['Close']).astype(int)
 
     df.dropna(inplace=True)
+
+    # -------- Regime --------
+    df = compute_regime(df)
+
     return df
+
 
 def get_feature_columns(df):
     return [c for c in df.columns if c not in ['Target_3m']]
