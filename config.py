@@ -12,8 +12,11 @@ FULL_YEAR_MINUTES = 525600
 BATCH_SIZE = 1500
 
 INITIAL_EQUITY = 10000
-RISK_PER_TRADE = 0.005  # 0.5% من الحساب لكل صفقة
+RISK_PER_TRADE = 0.005      # 0.5% من الحساب لكل صفقة
 MAX_LOOKAHEAD_MINUTES = 50  # عدد الدقائق لباك تست كل صفقة
+
+SPREAD = 0.0001
+COMMISSION_PER_TRADE = 0.0
 
 # Finnhub News
 FINNHUB_API_KEY = "d96hs19r01qr77dkhss0d96hs19r01qr77dkhssg"
