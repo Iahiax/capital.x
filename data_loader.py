@@ -13,17 +13,11 @@ from config import (
     USE_DEMO
 )
 
-# اختيار بيئة Demo أو Live
 BASE_URL = (
     "https://demo-api-capital.backend-capital.com/api/v1"
     if USE_DEMO else
     "https://api-capital.backend-capital.com/api/v1"
 )
-
-
-# ============================================================
-# 1) إنشاء جلسة Session والحصول على CST و X-SECURITY-TOKEN
-# ============================================================
 
 def create_session():
     url = f"{BASE_URL}/session"
@@ -43,24 +37,17 @@ def create_session():
 
     if r.status_code != 200:
         print("❌ خطأ في تسجيل الدخول:", r.text)
-        raise Exception("فشل تسجيل الدخول إلى Capital.com")
+        raise Exception("فشل تسجيل الدخول")
 
     CST = r.headers.get("CST")
     XST = r.headers.get("X-SECURITY-TOKEN")
 
     if not CST or not XST:
-        raise Exception("❌ لم يتم استلام CST أو X-SECURITY-TOKEN")
+        raise Exception("❌ لم يتم استلام الرموز")
 
     print("✅ تم تسجيل الدخول بنجاح")
-    print("CST:", CST)
-    print("XST:", XST)
-
     return CST, XST
 
-
-# ============================================================
-# 2) جلب دفعة بيانات واحدة
-# ============================================================
 
 def fetch_batch(CST, XST, start, end):
     url = f"{BASE_URL}/prices/{EPIC}/{RESOLUTION}"
@@ -86,7 +73,7 @@ def fetch_batch(CST, XST, start, end):
     data = r.json()
 
     if "prices" not in data:
-        print("⚠️ لا يوجد حقل prices في الرد")
+        print("⚠️ لا يوجد حقل prices")
         return pd.DataFrame()
 
     rows = []
@@ -106,12 +93,8 @@ def fetch_batch(CST, XST, start, end):
     return pd.DataFrame(rows)
 
 
-# ============================================================
-# 3) جلب سنة كاملة على دفعات أسبوعية
-# ============================================================
-
 def load_full_year_data():
-    print("🚀 بدء جلب بيانات سنة كاملة من Capital.com")
+    print("🚀 بدء جلب بيانات سنة كاملة")
 
     CST, XST = create_session()
 
@@ -119,8 +102,8 @@ def load_full_year_data():
     start = end - pd.Timedelta(days=365)
 
     all_data = []
-
     current = start
+
     while current < end:
         batch_end = current + pd.Timedelta(days=7)
 
@@ -132,24 +115,21 @@ def load_full_year_data():
             batch_end.strftime("%Y-%m-%dT%H:%M:%SZ")
         )
 
-        if df_batch.empty:
-            print("⚠️ دفعة فارغة – قد يكون API رفض الطلب")
-        else:
+        if not df_batch.empty:
             all_data.append(df_batch)
 
         current = batch_end
         time.sleep(0.5)
 
-    if len(all_data) == 0:
-        raise Exception("❌ لم يتم جلب أي بيانات – تحقق من API أو المفاتيح")
+    if not all_data:
+        raise Exception("❌ لم يتم جلب أي بيانات")
 
     df = pd.concat(all_data, ignore_index=True)
 
     if "Time" not in df.columns:
-        raise Exception("❌ خطأ: عمود Time غير موجود في البيانات")
+        raise Exception("❌ عمود Time غير موجود")
 
     df = df.drop_duplicates().set_index("Time").sort_index()
 
-    print("✅ تم تحميل البيانات بنجاح – عدد الشموع:", len(df))
-
+    print("✅ تم تحميل البيانات – عدد الشموع:", len(df))
     return df
