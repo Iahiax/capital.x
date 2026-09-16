@@ -3,7 +3,8 @@
 import pandas as pd
 from config import INITIAL_EQUITY, MAX_LOOKAHEAD_MINUTES, SPREAD, COMMISSION_PER_TRADE
 
-def run_backtest(trades_df, df_prices):
+
+def run_backtest(trades_df: pd.DataFrame, df_prices: pd.DataFrame):
     equity = INITIAL_EQUITY
     equity_curve = []
     wins = 0
@@ -11,7 +12,10 @@ def run_backtest(trades_df, df_prices):
     profits = []
     losses_list = []
 
-    for _, t in trades_df.iterrows():
+    trades_df = trades_df.copy()
+    trades_df['PnL'] = 0.0
+
+    for i, t in trades_df.iterrows():
         entry_time = t['Time']
         entry_price = t['Entry']
         tp = t['TP']
@@ -52,6 +56,8 @@ def run_backtest(trades_df, df_prices):
         else:
             profit = -COMMISSION_PER_TRADE
 
+        trades_df.at[i, 'PnL'] = profit
+
         equity += profit
         equity_curve.append(equity)
 
@@ -77,5 +83,7 @@ def run_backtest(trades_df, df_prices):
         'num_trades': num_trades,
         'win_rate': win_rate,
         'profit_factor': profit_factor,
-        'max_drawdown': max_dd
+        'max_drawdown': max_dd,
+        'equity_curve': equity_curve,
+        'trades_df': trades_df
     }
