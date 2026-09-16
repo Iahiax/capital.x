@@ -2,8 +2,10 @@
 
 import optuna
 import pandas as pd
-from risk import apply_risk_management
+from signals import compute_signal_score
+from risk_engine import RiskEngine
 from backtest import run_backtest
+
 
 def objective(trial, df_feat, df_prices):
     ai_long = trial.suggest_float("ai_long", 0.7, 0.9)
@@ -30,14 +32,7 @@ def objective(trial, df_feat, df_prices):
         if regime == 2:
             continue
 
-        score = (
-            row['AI_Prob'] * 50 +
-            (row['TrendStrength'] / (row['ATR'] + 1e-6)) * 10 +
-            row['BuyPressure'] * 10 +
-            row['RVOL'] * 10 -
-            row['ShockIndex'] * 10 -
-            row['NoiseIndex'] * 10
-        )
+        score = compute_signal_score(row)
 
         if score < score_min:
             continue
@@ -69,11 +64,40 @@ def objective(trial, df_feat, df_prices):
                 signals.append({'Time': idx, 'Type': 'SHORT', 'Price': row['Close'], 'ATR': row['ATR'], 'Score': score})
 
     signals_df = pd.DataFrame(signals)
-    trades_df = apply_risk_management(signals_df)
+
+    from risk_engine import RiskEngine
+    from config import INITIAL_EQUITY, RISK_PER_TRADE
+
+    trades = []
+    for _, s in signals_df.iterrows():
+        atr = s['ATR']
+        score = s['Score']
+
+        sl = atr * (1.0 - min(score / 200.0, 0.5))
+        tp = atr * (1.0 + min(score / 150.0, 1.0))
+
+        base_risk = INITIAL_EQUITY * RISK_PER_TRADE
+        quality_factor = min(max(score / 100.0, 0.5), 1.5)
+        risk_amount = base_risk * quality_factor
+
+        position_size = risk_amount / sl if sl > 0 else 0
+
+        trades.append({
+            'Time': s['Time'],
+            'Type': s['Type'],
+            'Entry': s['Price'],
+            'SL': sl,
+            'TP': tp,
+            'Size': position_size,
+            'Score': score
+        })
+
+    trades_df = pd.DataFrame(trades)
     stats = run_backtest(trades_df, df_prices)
 
     score_obj = stats['final_equity'] - stats['max_drawdown']
     return score_obj
+
 
 def run_optuna(df_feat, df_prices, n_trials=30):
     study = optuna.create_study(direction="maximize")
