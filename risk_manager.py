@@ -9,7 +9,7 @@
 - احترام الرافعة المالية 100:1
 """
 
-from config import INITIAL_EQUITY, RISK_PER_TRADE, LEVERAGE, SPREAD, COMMISSION_PER_TRADE
+from config import COMMISSION_PER_TRADE, LEVERAGE, RISK_PER_TRADE
 
 
 def calculate_position_size(
