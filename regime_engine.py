@@ -1,10 +1,9 @@
-# regime_engine.py
-# محرك "وضع السوق" + تقسيم البيانات حسب الـ Regime
-# هذا الملف يعتمد على وجود الأعمدة:
-# EMA_20, EMA_100, ATR, High, Low, Close, Volume (من features.py)
+"""Vectorized market-regime classification."""
 
-import pandas as pd
+from __future__ import annotations
+
 import numpy as np
+import pandas as pd
 
 
 def compute_regime(df: pd.DataFrame) -> pd.DataFrame:
@@ -22,34 +21,44 @@ def compute_regime(df: pd.DataFrame) -> pd.DataFrame:
     """
 
     df = df.copy()
+    if "TrendStrength" not in df.columns:
+        df["TrendStrength"] = df["EMA_20"] - df["EMA_100"]
 
-    # تأكيد وجود TrendStrength و ATR و Range و NoiseIndex
-    if 'TrendStrength' not in df.columns:
-        df['TrendStrength'] = df['EMA_20'] - df['EMA_100']
+    df["Range"] = df["High"] - df["Low"]
+    df["Range_Mean"] = df["Range"].rolling(50).mean()
+    df["NoiseIndex"] = df["Range"] / (df["Range_Mean"] + 1e-6)
+    trend_signal = df["TrendStrength"] / (df["ATR"] + 1e-6)
+    trend_up = 1.0 / (1.0 + np.exp(-trend_signal))
+    trend_down = 1.0 - trend_up
+    range_probability = np.exp(-np.abs(trend_signal)) * np.clip(
+        2.0 - df["NoiseIndex"], 0.0, 1.0
+    )
+    probability_total = trend_up + trend_down + range_probability
+    df["RegimeProbUp"] = trend_up / probability_total
+    df["RegimeProbDown"] = trend_down / probability_total
+    df["RegimeProbRange"] = range_probability / probability_total
 
-    df['Range'] = df['High'] - df['Low']
-    df['Range_Mean'] = df['Range'].rolling(50).mean()
-    df['NoiseIndex'] = df['Range'] / (df['Range_Mean'] + 1e-6)
+    atr_rank = df["ATR"].rolling(200, min_periods=20).rank(pct=True)
+    df["VolatilityRegime"] = np.select(
+        [
+            atr_rank.le(0.33),
+            atr_rank.le(0.66),
+            atr_rank.le(0.90),
+        ],
+        [0, 1, 2],
+        default=3,
+    ).astype(int)
 
-    regimes = []
-    for _, row in df.iterrows():
-        ts = row['TrendStrength']
-        noise = row['NoiseIndex']
-        atr = row['ATR']
-
-        # ترند واضح مع ضوضاء منخفضة
-        if abs(ts) > atr * 0.5 and noise < 1.2:
-            regimes.append(1 if ts > 0 else -1)
-
-        # تذبذب خفيف
-        elif noise < 1.5:
-            regimes.append(0)
-
-        # فوضى / ضوضاء عالية
-        else:
-            regimes.append(2)
-
-    df['Regime'] = regimes
+    trend = df["TrendStrength"].to_numpy()
+    noise = df["NoiseIndex"].to_numpy()
+    atr = df["ATR"].to_numpy()
+    clear_trend = (np.abs(trend) > atr * 0.5) & (noise < 1.2)
+    range_market = ~clear_trend & (noise < 1.5)
+    df["Regime"] = np.select(
+        [clear_trend & (trend > 0), clear_trend & (trend < 0), range_market],
+        [1, -1, 0],
+        default=2,
+    ).astype(int)
     return df
 
 
