@@ -1,9 +1,9 @@
 # backtest.py
 
 import pandas as pd
-from config import INITIAL_EQUITY, MAX_LOOKAHEAD_MINUTES
+from config import INITIAL_EQUITY, MAX_LOOKAHEAD_MINUTES, SPREAD, COMMISSION_PER_TRADE
 
-def run_backtest(trades_df, df_prices, spread=0.0001, commission_per_trade=0.0):
+def run_backtest(trades_df, df_prices):
     equity = INITIAL_EQUITY
     equity_curve = []
     wins = 0
@@ -27,30 +27,30 @@ def run_backtest(trades_df, df_prices, spread=0.0001, commission_per_trade=0.0):
             high = bar['High']
             low = bar['Low']
             if t['Type'] == 'LONG':
-                if high >= entry_price + tp + spread:
+                if high >= entry_price + tp + SPREAD:
                     hit_tp = True
                     break
-                if low <= entry_price - sl - spread:
+                if low <= entry_price - sl - SPREAD:
                     hit_sl = True
                     break
             else:
-                if low <= entry_price - tp - spread:
+                if low <= entry_price - tp - SPREAD:
                     hit_tp = True
                     break
-                if high >= entry_price + sl + spread:
+                if high >= entry_price + sl + SPREAD:
                     hit_sl = True
                     break
 
         if hit_tp:
-            profit = tp * size - commission_per_trade
+            profit = tp * size - COMMISSION_PER_TRADE
             wins += 1
             profits.append(profit)
         elif hit_sl:
-            profit = -sl * size - commission_per_trade
+            profit = -sl * size - COMMISSION_PER_TRADE
             losses += 1
             losses_list.append(-profit)
         else:
-            profit = -commission_per_trade
+            profit = -COMMISSION_PER_TRADE
 
         equity += profit
         equity_curve.append(equity)
