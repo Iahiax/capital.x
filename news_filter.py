@@ -1,8 +1,7 @@
-# news_filter.py
-
-import requests
 import pandas as pd
-from config import FINNHUB_API_KEY, NEWS_LOOKBACK_MINUTES, NEWS_COOLDOWN_MINUTES
+import requests
+
+from config import FINNHUB_API_KEY, NEWS_COOLDOWN_MINUTES, NEWS_LOOKBACK_MINUTES
 
 FINNHUB_URL = "https://finnhub.io/api/v1/news"
 
@@ -19,13 +18,22 @@ def fetch_forex_news():
     if r.status_code != 200:
         return pd.DataFrame(index=pd.DatetimeIndex([], name="Time"))
 
-    data = r.json()
+    try:
+        data = r.json()
+    except ValueError:
+        return pd.DataFrame(index=pd.DatetimeIndex([], name="Time"))
+    if not isinstance(data, list):
+        return pd.DataFrame(index=pd.DatetimeIndex([], name="Time"))
+
     rows = []
     for item in data:
         ts = item.get("datetime") or item.get("time")
         if ts is None:
             continue
-        t = pd.to_datetime(ts, unit='s', errors='coerce')
+        if isinstance(ts, (int, float)):
+            t = pd.to_datetime(ts, unit="s", errors="coerce", utc=True)
+        else:
+            t = pd.to_datetime(ts, errors="coerce", utc=True)
         rows.append({"Time": t})
 
     df_news = pd.DataFrame(rows).dropna().set_index("Time").sort_index()
