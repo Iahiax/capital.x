@@ -1,39 +1,35 @@
-# session_manager.py
+"""Capital.com authenticated session creation."""
+
+from __future__ import annotations
 
 import requests
-from config import API_KEY, EMAIL, PASSWORD, USE_DEMO
 
-BASE_URL = (
-    "https://demo-api-capital.backend-capital.com/api/v1"
-    if USE_DEMO else
-    "https://api-capital.backend-capital.com/api/v1"
-)
+import config
 
-def create_session():
-    url = f"{BASE_URL}/session"
 
+def create_session() -> tuple[str, str]:
+    config.validate_live_config()
+    url = f"{config.get_base_url()}/session"
     headers = {
-        "X-CAP-API-KEY": API_KEY,
-        "Content-Type": "application/json"
+        "X-CAP-API-KEY": config.API_KEY,
+        "Content-Type": "application/json",
     }
-
     data = {
-        "identifier": EMAIL,
-        "password": PASSWORD,
-        "encryptedPassword": False
+        "identifier": config.EMAIL,
+        "password": config.PASSWORD,
+        "encryptedPassword": False,
     }
 
-    r = requests.post(url, headers=headers, json=data)
+    try:
+        response = requests.post(
+            url, headers=headers, json=data, timeout=config.REQUEST_TIMEOUT
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Capital.com session creation failed: {exc}") from exc
 
-    if r.status_code != 200:
-        print("❌ error.invalid.details:", r.text)
-        raise Exception("فشل تسجيل الدخول")
-
-    CST = r.headers.get("CST")
-    XST = r.headers.get("X-SECURITY-TOKEN")
-
-    if not CST or not XST:
-        raise Exception("❌ لم يتم استلام الرموز")
-
-    print("✅ تم تسجيل الدخول بنجاح")
-    return CST, XST
+    cst = response.headers.get("CST")
+    xst = response.headers.get("X-SECURITY-TOKEN")
+    if not cst or not xst:
+        raise RuntimeError("Capital.com did not return session tokens")
+    return cst, xst
