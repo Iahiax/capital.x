@@ -12,6 +12,7 @@ except ImportError:
         ) from exc
 import numpy as np
 
+
 class TradingEnv(gym.Env):
     def __init__(self, df):
         super().__init__()
