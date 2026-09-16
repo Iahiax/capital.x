@@ -29,4 +29,5 @@ ai_trading_system/
     ├── meta_model.bin
 
 
-pip install pandas numpy xgboost lightgbm optuna joblib requests gym
+pip install pandas numpy xgboost lightgbm optuna joblib requests gym install scikit-learn
+
