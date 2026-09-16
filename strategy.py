@@ -1,82 +1,67 @@
-# strategy.py
-"""
-استراتيجية التداول الحي بالذكاء الاصطناعي:
-- تستخدم نفس البايبلاين البحثي:
-    - create_pro_features
-    - train_regime_models
-    - add_ai_prob
-    - train_meta_model
-    - load_meta_model
-    - generate_signals
-- لكن بدل أن تنتهي بباك تست، تنتج إشارة حيّة:
-    - BUY / SELL / None
-    - مع Meta: stop_pips, pip_value, score, regime
-"""
+"""AI-assisted live trading strategy."""
+
+from __future__ import annotations
 
 import pandas as pd
-from typing import Tuple, Dict, Optional
 
+from drift_monitor import feature_drift
 from features import create_pro_features
-from model import train_regime_models, add_ai_prob, train_meta_model, load_meta_model
+from model import (
+    add_ai_prob,
+    generate_oof_ai_prob,
+    train_meta_model,
+    train_regime_models,
+)
 from signals import generate_signals
 
 AI_STATE = {
     "regime_models": None,
     "meta_model": None,
     "features_df": None,
+    "candles_df": None,
+    "reference_features_df": None,
+    "drift_status": {},
+    "last_audit": {},
 }
 
 
 def init_ai_model(history_df: pd.DataFrame) -> None:
-    """
-    تهيئة نموذج الذكاء الاصطناعي باستخدام البيانات التاريخية:
-    - بناء الميزات
-    - تدريب نماذج Regime
-    - إضافة احتمالات AI
-    - تدريب Meta-Model
-    - تحميله للاستخدام الحي
-    """
-    global AI_STATE
+    """Train the live strategy models from historical candles once."""
 
-    print("🧠 تهيئة نموذج الذكاء الاصطناعي بالبيانات التاريخية...")
-
-    # بناء الميزات
     df_feat = create_pro_features(history_df)
-
-    # تدريب نماذج Regime
-    regime_models = train_regime_models(df_feat)
-
-    # إضافة احتمالات AI
+    oof_predictions = generate_oof_ai_prob(df_feat)
+    regime_models = train_regime_models(df_feat, persist=False)
     df_feat = add_ai_prob(df_feat, regime_models)
-
-    # تدريب Meta-Model
-    meta_model = train_meta_model(df_feat)
-
-    # تحميل Meta-Model (إذا كان محفوظًا)
-    meta_model = load_meta_model()
+    meta_model = train_meta_model(df_feat, oof_predictions, persist=False)
 
     AI_STATE["regime_models"] = regime_models
     AI_STATE["meta_model"] = meta_model
     AI_STATE["features_df"] = df_feat
+    AI_STATE["candles_df"] = history_df.copy()
+    AI_STATE["reference_features_df"] = df_feat.copy()
+    AI_STATE["drift_status"] = {}
 
-    print("✅ تم تهيئة نماذج الذكاء الاصطناعي للتداول الحي")
+
+def refresh_ai_features(candles_df: pd.DataFrame) -> pd.DataFrame:
+    """Rebuild live features after new candles without retraining models."""
+
+    regime_models = AI_STATE["regime_models"]
+    if regime_models is None:
+        raise RuntimeError("AI strategy must be initialized before refreshing features")
+
+    refreshed = create_pro_features(candles_df)
+    refreshed = add_ai_prob(refreshed, regime_models)
+    AI_STATE["features_df"] = refreshed
+    AI_STATE["candles_df"] = candles_df.copy()
+
+    reference = AI_STATE["reference_features_df"]
+    if reference is not None:
+        AI_STATE["drift_status"] = feature_drift(reference, refreshed)
+    return refreshed
 
 
-def generate_signal() -> Tuple[Optional[str], Dict]:
-    """
-    إنتاج إشارة تداول حيّة:
-    - تستخدم آخر صف من df_feat
-    - تستخدم meta_model لتقييم الإشارة
-    - تعيد:
-        - signal: "BUY" / "SELL" / None
-        - meta: dict يحتوي:
-            - stop_pips
-            - pip_value
-            - regime
-            - score
-    """
-
-    global AI_STATE
+def generate_signal() -> tuple[str | None, dict]:
+    """Generate the latest live BUY/SELL signal and its execution metadata."""
 
     meta_model = AI_STATE["meta_model"]
     df_feat = AI_STATE["features_df"]
@@ -85,37 +70,46 @@ def generate_signal() -> Tuple[Optional[str], Dict]:
         print("⚠️ نماذج الذكاء الاصطناعي غير مهيأة بعد – لا توجد إشارة")
         return None, {}
 
-    # توليد الإشارات باستخدام نفس المنطق البحثي
     signals_df = generate_signals(
         df_feat,
-        news_blackout=None,   # يمكنك لاحقًا ربط news_filter هنا
+        news_blackout=None,
         meta_model=meta_model,
     )
+    AI_STATE["last_audit"] = signals_df.attrs.get("rejection_counts", {})
 
     if signals_df.empty:
-        print("⚠️ لا توجد إشارات من النموذج")
-        return None, {}
+        return None, {"rejection_counts": AI_STATE["last_audit"]}
 
-    # نأخذ آخر إشارة كإشارة حيّة
-    s = signals_df.iloc[-1]
+    signal_row = signals_df.iloc[-1]
+    signal_type = "BUY" if signal_row["Type"] == "LONG" else "SELL"
+    score = signal_row.get("Score", 0.0)
+    atr = signal_row.get("ATR", 0.001)
+    regime = signal_row.get("Regime", "UNKNOWN")
 
-    signal_type = s["Type"]          # "BUY" أو "SELL"
-    score = s.get("Score", 0.0)
-    atr = s.get("ATR", 0.001)
-    regime = s.get("Regime", "UNKNOWN")
+    sl = max(atr * (1.0 - min(score / 200.0, 0.5)), 1e-6)
+    tp = max(atr * (1.0 + min(score / 150.0, 1.0)), sl)
+    stop_pips = max(sl * 10000, 10.0)
 
-    # تحويل Score + ATR إلى stop_pips
-    # نفس المنطق الذي كنت تستخدمه في main.py القديم تقريبًا
-    sl = atr * (1.0 - min(score / 200.0, 0.5))
-    stop_pips = max(sl * 10000, 10.0)   # تحويل إلى نقاط تقريبية
-    pip_value = 0.0001
-
-    meta = {
+    return signal_type, {
+        "signal_time": signal_row["Time"],
+        "entry_price": float(signal_row["Price"]),
         "regime": regime,
         "stop_pips": stop_pips,
-        "pip_value": pip_value,
+        "pip_value": 0.0001,
+        "stop_distance": sl,
+        "take_profit_distance": tp,
         "score": score,
         "atr": atr,
     }
 
-    return signal_type, meta
+
+def update_ai_context(latest_df: pd.DataFrame) -> None:
+    """Compatibility wrapper for refreshing features and drift status."""
+
+    if AI_STATE["meta_model"] is None:
+        raise RuntimeError("AI model must be initialized before refreshing context")
+    refresh_ai_features(latest_df)
+
+
+def get_drift_status() -> dict[str, float]:
+    return dict(AI_STATE["drift_status"])
