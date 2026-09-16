@@ -1,10 +1,14 @@
-# capital_allocation.py
-
 def allocate_capital(equity, perf_trend, perf_range, perf_breakout):
-    total = perf_trend + perf_range + perf_breakout + 1e-6
-    w_trend = perf_trend / total
-    w_range = perf_range / total
-    w_breakout = perf_breakout / total
+    performances = [max(float(value), 0.0) for value in (
+        perf_trend,
+        perf_range,
+        perf_breakout,
+    )]
+    if sum(performances) == 0:
+        performances = [1.0, 1.0, 1.0]
+
+    total = sum(performances)
+    w_trend, w_range, w_breakout = (value / total for value in performances)
 
     return {
         'trend_capital': equity * w_trend,
