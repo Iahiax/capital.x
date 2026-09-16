@@ -2,6 +2,9 @@
 
 import pandas as pd
 import numpy as np
+from orderflow import add_orderflow_features
+from regime_engine import compute_regime
+
 
 def kalman_filter(series, process_variance=1e-5, measurement_variance=1e-2):
     n = len(series)
@@ -19,29 +22,13 @@ def kalman_filter(series, process_variance=1e-5, measurement_variance=1e-2):
         P[k] = (1 - K) * P_minus
     return pd.Series(xhat, index=series.index)
 
-def compute_regime_and_quality(df):
+
+def add_market_quality(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-
     df['TrendStrength'] = df['EMA_20'] - df['EMA_100']
-
     df['Range'] = df['High'] - df['Low']
     df['Range_Mean'] = df['Range'].rolling(50).mean()
     df['NoiseIndex'] = df['Range'] / (df['Range_Mean'] + 1e-6)
-
-    regimes = []
-    for i, row in df.iterrows():
-        ts = row['TrendStrength']
-        noise = row['NoiseIndex']
-        atr = row['ATR']
-
-        if abs(ts) > atr * 0.5 and noise < 1.2:
-            regimes.append(1 if ts > 0 else -1)
-        elif noise < 1.5:
-            regimes.append(0)
-        else:
-            regimes.append(2)
-
-    df['Regime'] = regimes
 
     df['MarketQuality'] = \
         (df['TrendStrength'] / (df['ATR'] + 1e-6)) * 0.4 + \
@@ -50,10 +37,33 @@ def compute_regime_and_quality(df):
 
     return df
 
-def create_pro_features(df):
+
+def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
+    df_5m = df['Close'].resample('5T').ohlc()
+    df_15m = df['Close'].resample('15T').ohlc()
+
+    df_5m['EMA_5m_20'] = df_5m['close'].ewm(span=20).mean()
+    df_15m['EMA_15m_20'] = df_15m['close'].ewm(span=20).mean()
+
+    df_5m = df_5m[['EMA_5m_20']]
+    df_15m = df_15m[['EMA_15m_20']]
+
+    df = pd.merge_asof(
+        df.sort_index(), df_5m.sort_index(),
+        left_index=True, right_index=True, direction='backward'
+    )
+    df = pd.merge_asof(
+        df.sort_index(), df_15m.sort_index(),
+        left_index=True, right_index=True, direction='backward'
+    )
+
+    return df
+
+
+def create_pro_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    df['EMA_20']  = df['Close'].ewm(span=20).mean()
+    df['EMA_20'] = df['Close'].ewm(span=20).mean()
     df['EMA_100'] = df['Close'].ewm(span=100).mean()
     df['EMA_300'] = df['Close'].ewm(span=300).mean()
 
@@ -67,14 +77,14 @@ def create_pro_features(df):
     df['Kalman_Fast'] = kalman_filter(df['Close'], 1e-4, 1e-2)
     df['Kalman_Fast_Slope'] = df['Kalman_Fast'].diff()
 
-    df['BuyPressure']  = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 1e-6)
+    df['BuyPressure'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 1e-6)
     df['SellPressure'] = (df['High'] - df['Close']) / (df['High'] - df['Low'] + 1e-6)
 
     df['RVOL'] = df['Volume'] / (df['Volume'].rolling(20).mean() + 1e-6)
 
     df['ShockIndex'] = np.abs(df['Close'].diff()) / (df['ATR'] + 1e-6)
 
-    df['SmartDiv'] = (df['MACD'] - df['MACD_Signal']) * df['TrendStrength']
+    df['SmartDiv'] = (df['MACD'] - df['MACD_Signal']) * (df['EMA_20'] - df['EMA_100'])
 
     df['Compression'] = (df['High'] - df['Low']).rolling(10).mean()
 
@@ -83,11 +93,15 @@ def create_pro_features(df):
 
     df['Target_3m'] = (df['Close'].shift(-3) > df['Close']).astype(int)
 
-    df.dropna(inplace=True)
+    df = add_orderflow_features(df)
+    df = add_multi_timeframe_features(df)
+    df = compute_regime(df)
+    df = add_market_quality(df)
 
-    df = compute_regime_and_quality(df)
+    df.dropna(inplace=True)
 
     return df
 
-def get_feature_columns(df):
+
+def get_feature_columns(df: pd.DataFrame):
     return [c for c in df.columns if c not in ['Target_3m']]
