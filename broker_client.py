@@ -1,59 +1,106 @@
-# broker_client.py
+"""Small Capital.com trading client."""
+
+from __future__ import annotations
+
+import logging
 
 import requests
-from config import API_KEY, EPIC, USE_DEMO
+
+import config
 from session_manager import create_session
 
-BASE_URL = (
-    "https://demo-api-capital.backend-capital.com/api/v1"
-    if USE_DEMO else
-    "https://api-capital.backend-capital.com/api/v1"
-)
+logger = logging.getLogger(__name__)
+
 
 class BrokerClient:
     def __init__(self):
-        self.CST, self.XST = create_session()
+        self.cst, self.xst = create_session()
 
-    def _headers(self):
+    def _headers(self) -> dict[str, str]:
         return {
-            "X-CAP-API-KEY": API_KEY,
-            "CST": self.CST,
-            "X-SECURITY-TOKEN": self.XST,
-            "Content-Type": "application/json"
+            "X-CAP-API-KEY": config.API_KEY,
+            "CST": self.cst,
+            "X-SECURITY-TOKEN": self.xst,
+            "Content-Type": "application/json",
         }
 
-    def get_open_positions(self):
-        url = f"{BASE_URL}/positions"
-        r = requests.get(url, headers=self._headers())
-        if r.status_code != 200:
-            print("❌ Error get_open_positions:", r.text)
-            return []
-        data = r.json()
-        return data.get("positions", [])
+    def get_open_positions(self) -> list[dict] | None:
+        url = f"{config.get_base_url()}/positions"
+        try:
+            response = requests.get(
+                url, headers=self._headers(), timeout=config.REQUEST_TIMEOUT
+            )
+            response.raise_for_status()
+            return response.json().get("positions", [])
+        except (requests.RequestException, ValueError) as exc:
+            logger.error("Capital.com positions request failed: %s", exc)
+            return None
 
-    def open_market_order(self, direction, size, stop_loss=None, take_profit=None):
-        url = f"{BASE_URL}/positions"
+    def get_recent_candles(
+        self,
+        lookback_minutes: int | None = None,
+        end=None,
+    ):
+        """Fetch fresh market candles using this client's authenticated session."""
+
+        from data_loader import fetch_recent_candles
+
+        return fetch_recent_candles(
+            self.cst,
+            self.xst,
+            lookback_minutes=lookback_minutes,
+            end=end,
+        )
+
+    def open_market_order(
+        self,
+        direction: str,
+        size: float,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+    ) -> dict | None:
+        if direction not in {"BUY", "SELL"}:
+            raise ValueError("direction must be BUY or SELL")
+        if size <= 0:
+            raise ValueError("size must be positive")
+
+        url = f"{config.get_base_url()}/positions"
         body = {
-            "epic": EPIC,
-            "direction": direction,  # "BUY" أو "SELL"
+            "epic": config.EPIC,
+            "direction": direction,
             "size": size,
-            "orderType": "MARKET"
+            "orderType": "MARKET",
         }
         if stop_loss is not None:
             body["stopLevel"] = stop_loss
         if take_profit is not None:
             body["limitLevel"] = take_profit
 
-        r = requests.post(url, headers=self._headers(), json=body)
-        print("📤 فتح صفقة:", r.status_code, r.text)
-        return r.json() if r.status_code == 200 else None
+        try:
+            response = requests.post(
+                url,
+                headers=self._headers(),
+                json=body,
+                timeout=config.REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            return response.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.error("Capital.com order request failed: %s", exc)
+            return None
 
-    def close_position(self, deal_id):
-        url = f"{BASE_URL}/positions/close"
-        body = {
-            "dealId": deal_id,
-            "size": "ALL"
-        }
-        r = requests.post(url, headers=self._headers(), json=body)
-        print("📤 إغلاق صفقة:", r.status_code, r.text)
-        return r.json() if r.status_code == 200 else None
+    def close_position(self, deal_id: str) -> dict | None:
+        url = f"{config.get_base_url()}/positions/close"
+        body = {"dealId": deal_id, "size": "ALL"}
+        try:
+            response = requests.post(
+                url,
+                headers=self._headers(),
+                json=body,
+                timeout=config.REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            return response.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.error("Capital.com close request failed: %s", exc)
+            return None
