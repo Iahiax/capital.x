@@ -1,26 +1,77 @@
 # data_loader.py
-# ملف جلب البيانات كامل – يدعم جلب سنة كاملة بدون أخطاء
+# جلب البيانات من Capital.com بالطريقة الرسمية حسب شرح الدعم الفني
 
 import requests
 import pandas as pd
 import time
-from config import API_KEY, API_KEY_PASSWORD, EPIC, RESOLUTION
+from config import (
+    API_KEY,
+    API_KEY_PASSWORD,
+    EMAIL,
+    PASSWORD,
+    EPIC,
+    RESOLUTION,
+    USE_DEMO
+)
 
-BASE_URL = "https://api.ig.com/gateway/deal"
+# اختيار بيئة Demo أو Live
+BASE_URL = (
+    "https://demo-api-capital.backend-capital.com/api/v1"
+    if USE_DEMO else
+    "https://api-capital.backend-capital.com/api/v1"
+)
 
 
-def fetch_batch(start, end):
-    """
-    يجلب دفعة بيانات من API بين start و end
-    ويعيد DataFrame يحتوي على Time و OHLC و Volume
-    """
+# ============================================================
+# 1) إنشاء جلسة Session والحصول على CST و X-SECURITY-TOKEN
+# ============================================================
 
-    url = f"{BASE_URL}/prices/{EPIC}/{RESOLUTION}"
+def create_session():
+    url = f"{BASE_URL}/session"
+
     headers = {
-        "X-IG-API-KEY": API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "VERSION": "3"
+        "X-CAP-API-KEY": API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "identifier": EMAIL,
+        "password": PASSWORD,
+        "encryptedPassword": False,
+        "apiKey": API_KEY,
+        "apiKeyPassword": API_KEY_PASSWORD
+    }
+
+    r = requests.post(url, headers=headers, json=data)
+
+    if r.status_code != 200:
+        print("❌ خطأ في تسجيل الدخول:", r.text)
+        raise Exception("فشل تسجيل الدخول إلى Capital.com")
+
+    CST = r.headers.get("CST")
+    XST = r.headers.get("X-SECURITY-TOKEN")
+
+    if not CST or not XST:
+        raise Exception("❌ لم يتم استلام CST أو X-SECURITY-TOKEN")
+
+    print("✅ تم تسجيل الدخول بنجاح")
+    print("CST:", CST)
+    print("XST:", XST)
+
+    return CST, XST
+
+
+# ============================================================
+# 2) جلب دفعة بيانات واحدة
+# ============================================================
+
+def fetch_batch(CST, XST, start, end):
+    url = f"{BASE_URL}/prices/{EPIC}/{RESOLUTION}"
+
+    headers = {
+        "X-CAP-API-KEY": API_KEY,
+        "CST": CST,
+        "X-SECURITY-TOKEN": XST
     }
 
     params = {
@@ -31,7 +82,6 @@ def fetch_batch(start, end):
 
     r = requests.get(url, headers=headers, params=params)
 
-    # إذا API رجعت خطأ
     if r.status_code != 200:
         print("❌ API Error:", r.text)
         return pd.DataFrame()
@@ -39,7 +89,7 @@ def fetch_batch(start, end):
     data = r.json()
 
     if "prices" not in data:
-        print("❌ No 'prices' field in API response")
+        print("⚠️ لا يوجد حقل prices في الرد")
         return pd.DataFrame()
 
     rows = []
@@ -59,28 +109,28 @@ def fetch_batch(start, end):
     return pd.DataFrame(rows)
 
 
+# ============================================================
+# 3) جلب سنة كاملة على دفعات أسبوعية
+# ============================================================
+
 def load_full_year_data():
-    """
-    يجلب بيانات سنة كاملة على دفعات صغيرة
-    ويتأكد من وجود عمود Time
-    """
+    print("🚀 بدء جلب بيانات سنة كاملة من Capital.com")
 
-    print("🚀 جلب بيانات سنة كاملة لزوج", EPIC)
+    CST, XST = create_session()
 
-    # نحدد التاريخ الحالي
     end = pd.Timestamp.utcnow()
     start = end - pd.Timedelta(days=365)
 
     all_data = []
 
-    # نقسم السنة إلى دفعات شهرية
     current = start
     while current < end:
-        batch_end = current + pd.Timedelta(days=30)
+        batch_end = current + pd.Timedelta(days=7)
 
         print(f"📦 جلب البيانات من {current} إلى {batch_end}")
 
         df_batch = fetch_batch(
+            CST, XST,
             current.strftime("%Y-%m-%dT%H:%M:%SZ"),
             batch_end.strftime("%Y-%m-%dT%H:%M:%SZ")
         )
@@ -91,14 +141,13 @@ def load_full_year_data():
             all_data.append(df_batch)
 
         current = batch_end
-        time.sleep(0.5)  # منع الضغط على API
+        time.sleep(0.5)
 
     if len(all_data) == 0:
         raise Exception("❌ لم يتم جلب أي بيانات – تحقق من API أو المفاتيح")
 
     df = pd.concat(all_data, ignore_index=True)
 
-    # التأكد من وجود عمود Time
     if "Time" not in df.columns:
         raise Exception("❌ خطأ: عمود Time غير موجود في البيانات")
 
