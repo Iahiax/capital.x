@@ -2,7 +2,6 @@
 # ميزات تقريبية لتدفق الأوامر (Order Flow) من شكل الشموع فقط
 
 import pandas as pd
-import numpy as np
 
 
 def add_orderflow_features(df: pd.DataFrame) -> pd.DataFrame:
