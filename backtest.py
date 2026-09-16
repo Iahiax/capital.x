@@ -8,6 +8,8 @@ def run_backtest(trades_df, df_prices):
     equity_curve = []
     wins = 0
     losses = 0
+    profits = []
+    losses_list = []
 
     for _, t in trades_df.iterrows():
         entry_time = t['Time']
@@ -42,9 +44,11 @@ def run_backtest(trades_df, df_prices):
         if hit_tp:
             profit = tp * size
             wins += 1
+            profits.append(profit)
         elif hit_sl:
             profit = -sl * size
             losses += 1
+            losses_list.append(-profit)
         else:
             profit = 0
 
@@ -54,9 +58,25 @@ def run_backtest(trades_df, df_prices):
     num_trades = len(trades_df)
     win_rate = wins / num_trades * 100 if num_trades > 0 else 0
 
+    total_profit = sum(profits)
+    total_loss = sum(losses_list) if len(losses_list) > 0 else 0
+    profit_factor = total_profit / total_loss if total_loss > 0 else None
+
+    # حساب Max Drawdown
+    max_equity = INITIAL_EQUITY
+    max_dd = 0
+    for e in equity_curve:
+        if e > max_equity:
+            max_equity = e
+        dd = (max_equity - e)
+        if dd > max_dd:
+            max_dd = dd
+
     return {
         'final_equity': equity,
         'profit': equity - INITIAL_EQUITY,
         'num_trades': num_trades,
-        'win_rate': win_rate
+        'win_rate': win_rate,
+        'profit_factor': profit_factor,
+        'max_drawdown': max_dd
     }
