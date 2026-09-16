@@ -17,7 +17,7 @@ def main():
     df_feat = add_ai_prob(df_feat, models)
 
     best_params = run_optuna(df_feat, df, n_trials=20)
-    print("✅ تم تحسين الفلاتر باستخدام Optuna")
+    print("✅ تم تحسين الفلاتر باستخدام Optuna:", best_params)
 
     signals_df = generate_signals(df_feat)
     trades_df = apply_risk_management(signals_df)
