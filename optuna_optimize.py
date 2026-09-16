@@ -1,9 +1,17 @@
-# optuna_optimize.py
+"""Optional hyperparameter optimization for the signal filters."""
+
+from __future__ import annotations
+
+import logging
 
 import pandas as pd
-from signals import compute_signal_score
-from risk_engine import RiskEngine
+
 from backtest import run_backtest
+from config import INITIAL_EQUITY, RISK_PER_TRADE
+from signals import generate_signals
+from walk_forward import probabilistic_sharpe_ratio
+
+logger = logging.getLogger(__name__)
 
 try:
     import optuna
@@ -11,104 +19,55 @@ except ImportError:
     optuna = None
 
 
-def objective(trial, df_feat, df_prices):
-    ai_long = trial.suggest_float("ai_long", 0.7, 0.9)
-    ai_short = trial.suggest_float("ai_short", 0.1, 0.3)
-    rvol_min = trial.suggest_float("rvol_min", 0.8, 1.5)
-    shock_max = trial.suggest_float("shock_max", 1.0, 2.0)
-    noise_max = trial.suggest_float("noise_max", 1.2, 2.0)
-    mq_min = trial.suggest_float("mq_min", -0.2, 0.3)
-    score_min = trial.suggest_float("score_min", 50, 80)
-
-    signals = []
-
-    for idx, row in df_feat.iterrows():
-        hour = row['Hour']
-        regime = row['Regime']
-        mq = row['MarketQuality']
-
-        if not (8 <= hour <= 11 or 14 <= hour <= 17):
-            continue
-
-        if mq < mq_min:
-            continue
-
-        if regime == 2:
-            continue
-
-        score = compute_signal_score(row)
-
-        if score < score_min:
-            continue
-
-        if regime == 1:
-            if (
-                row['AI_Prob'] > ai_long and
-                row['TrendStrength'] > 0 and
-                row['Kalman_Fast_Slope'] > 0 and
-                row['BuyPressure'] > 0.6 and
-                row['RVOL'] > rvol_min and
-                row['ShockIndex'] < shock_max and
-                row['SmartDiv'] > 0 and
-                row['NoiseIndex'] < noise_max
-            ):
-                signals.append({'Time': idx, 'Type': 'LONG', 'Price': row['Close'], 'ATR': row['ATR'], 'Score': score})
-
-        if regime == -1:
-            if (
-                row['AI_Prob'] < ai_short and
-                row['TrendStrength'] < 0 and
-                row['Kalman_Fast_Slope'] < 0 and
-                row['SellPressure'] > 0.6 and
-                row['RVOL'] > rvol_min and
-                row['ShockIndex'] < shock_max and
-                row['SmartDiv'] < 0 and
-                row['NoiseIndex'] < noise_max
-            ):
-                signals.append({'Time': idx, 'Type': 'SHORT', 'Price': row['Close'], 'ATR': row['ATR'], 'Score': score})
-
-    signals_df = pd.DataFrame(signals)
-
-    from risk_engine import RiskEngine
-    from config import INITIAL_EQUITY, RISK_PER_TRADE
-
-    trades = []
-    for _, s in signals_df.iterrows():
-        atr = s['ATR']
-        score = s['Score']
-
-        sl = atr * (1.0 - min(score / 200.0, 0.5))
-        tp = atr * (1.0 + min(score / 150.0, 1.0))
-
-        base_risk = INITIAL_EQUITY * RISK_PER_TRADE
-        quality_factor = min(max(score / 100.0, 0.5), 1.5)
-        risk_amount = base_risk * quality_factor
-
-        position_size = risk_amount / sl if sl > 0 else 0
-
-        trades.append({
-            'Time': s['Time'],
-            'Type': s['Type'],
-            'Entry': s['Price'],
-            'SL': sl,
-            'TP': tp,
-            'Size': position_size,
-            'Score': score
-        })
-
-    trades_df = pd.DataFrame(trades)
-    stats = run_backtest(trades_df, df_prices)
-
-    score_obj = stats['final_equity'] - stats['max_drawdown']
-    return score_obj
+def _build_trades(signals_df: pd.DataFrame) -> pd.DataFrame:
+    if signals_df.empty:
+        return pd.DataFrame(columns=["Time", "Type", "Entry", "SL", "TP", "Size"])
+    atr = signals_df["ATR"].clip(lower=1e-6)
+    score = signals_df["Score"]
+    sl = (atr * (1.0 - (score / 200.0).clip(upper=0.5))).clip(lower=1e-6)
+    tp = (atr * (1.0 + (score / 150.0).clip(upper=1.0))).clip(lower=sl)
+    quality = (score / 100.0).clip(0.5, 1.5)
+    return pd.DataFrame(
+        {
+            "Time": signals_df["Time"],
+            "Type": signals_df["Type"],
+            "Entry": signals_df["Price"],
+            "SL": sl,
+            "TP": tp,
+            "Size": INITIAL_EQUITY * RISK_PER_TRADE * quality / sl,
+            "Score": score,
+        }
+    )
 
 
-def run_optuna(df_feat, df_prices, n_trials=30):
+def objective(trial, df_feat: pd.DataFrame, df_prices: pd.DataFrame) -> float:
+    parameters = {
+        "ai_long": trial.suggest_float("ai_long", 0.55, 0.8),
+        "ai_short": trial.suggest_float("ai_short", 0.2, 0.45),
+        "rvol_min": trial.suggest_float("rvol_min", 0.8, 1.5),
+        "shock_max": trial.suggest_float("shock_max", 1.0, 2.0),
+        "noise_max": trial.suggest_float("noise_max", 1.2, 2.0),
+        "mq_min": trial.suggest_float("mq_min", -0.2, 0.3),
+        "score_min": trial.suggest_float("score_min", 50, 80),
+    }
+    signals_df = generate_signals(df_feat, parameters=parameters)
+    stats = run_backtest(_build_trades(signals_df), df_prices)
+    executed = stats["trades_df"].query("Status == 'EXECUTED'")
+    psr = probabilistic_sharpe_ratio(executed["PnL"])
+    drawdown_penalty = stats["max_drawdown"] / max(INITIAL_EQUITY, 1.0)
+    return float(psr * 100 + stats["profit"] / max(INITIAL_EQUITY, 1.0) - drawdown_penalty)
+
+
+def run_optuna(
+    df_feat: pd.DataFrame, df_prices: pd.DataFrame, n_trials: int = 30
+) -> dict:
+    if n_trials < 1:
+        raise ValueError("n_trials must be at least 1")
     if optuna is None:
-        print("Optuna is not installed; using safe default filter parameters.")
+        logger.warning("Optuna is not installed; using safe default filter parameters.")
         return {
-            "ai_long": 0.8,
-            "ai_short": 0.2,
+            "ai_long": 0.55,
+            "ai_short": 0.45,
             "rvol_min": 1.2,
             "shock_max": 1.5,
             "noise_max": 1.5,
@@ -117,7 +76,9 @@ def run_optuna(df_feat, df_prices, n_trials=30):
         }
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(lambda trial: objective(trial, df_feat, df_prices), n_trials=n_trials)
-    print("Best params:", study.best_params)
-    print("Best score:", study.best_value)
+    study.optimize(
+        lambda trial: objective(trial, df_feat, df_prices), n_trials=n_trials
+    )
+    logger.info("Best params: %s", study.best_params)
+    logger.info("Best score: %s", study.best_value)
     return study.best_params
