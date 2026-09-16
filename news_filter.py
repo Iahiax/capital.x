@@ -19,7 +19,6 @@ def fetch_forex_news():
     data = r.json()
     rows = []
     for item in data:
-        # Finnhub يعيد datetime كـ timestamp أو string حسب الإعداد
         ts = item.get("datetime") or item.get("time") or None
         if ts is None:
             continue
@@ -35,9 +34,6 @@ def fetch_forex_news():
     return df_news
 
 def build_news_blackout(df_prices, df_news):
-    """
-    تبني فلتر زمني يمنع التداول قبل وبعد الأخبار
-    """
     blackout = pd.Series(False, index=df_prices.index)
 
     for news_time in df_news.index:
