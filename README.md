@@ -1,8 +1,7 @@
 # capital.x
 ai_trading_system/
 │
-├── main.py
-│
+├── config.py
 ├── data_loader.py
 ├── features.py
 ├── model.py
@@ -10,9 +9,8 @@ ai_trading_system/
 ├── risk.py
 ├── backtest.py
 ├── alerts.py
-├── live_trading.py
-│
-├── config.py
+├── optuna_optimize.py
+├── main.py
 │
 └── models/
     ├── xgb_model.bin
