@@ -2,22 +2,37 @@
 
 import pandas as pd
 
-def generate_signals(df):
+def compute_signal_score(row):
+    score = 0
+    score += row['AI_Prob'] * 50
+    score += (row['TrendStrength'] / (row['ATR'] + 1e-6)) * 10
+    score += row['BuyPressure'] * 10
+    score += row['RVOL'] * 10
+    score -= row['ShockIndex'] * 10
+    score -= row['NoiseIndex'] * 10
+    return score
+
+def generate_signals(df, news_blackout=None):
     signals = []
 
     for idx, row in df.iterrows():
         hour = row['Hour']
         regime = row['Regime']
+        mq = row['MarketQuality']
 
-        # فلترة وقتية
         if not (8 <= hour <= 11 or 14 <= hour <= 17):
             continue
 
-        # تجنب الفوضى
-        if regime == 2:
+        if news_blackout is not None and news_blackout.loc[idx]:
             continue
 
-        # LONG فقط في ترند صاعد
+        if mq < 0.0:
+            continue
+
+        score = compute_signal_score(row)
+        if score < 60:
+            continue
+
         if regime == 1:
             if (
                 row['AI_Prob'] > 0.80 and
@@ -33,10 +48,10 @@ def generate_signals(df):
                     'Time': idx,
                     'Type': 'LONG',
                     'Price': row['Close'],
-                    'ATR': row['ATR']
+                    'ATR': row['ATR'],
+                    'Score': score
                 })
 
-        # SHORT فقط في ترند هابط
         if regime == -1:
             if (
                 row['AI_Prob'] < 0.20 and
@@ -52,11 +67,8 @@ def generate_signals(df):
                     'Time': idx,
                     'Type': 'SHORT',
                     'Price': row['Close'],
-                    'ATR': row['ATR']
+                    'ATR': row['ATR'],
+                    'Score': score
                 })
-
-        # في التذبذب (Regime = 0) يمكن تقليل الإشارات أو تجاهلها
-        # هنا مثلاً نتجاهلها تماماً:
-        # if regime == 0: continue
 
     return pd.DataFrame(signals)
