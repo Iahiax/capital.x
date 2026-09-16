@@ -1,52 +1,96 @@
 # model.py
 
-import xgboost as xgb
-from lightgbm import LGBMClassifier
 import joblib
+import numpy as np
+import pandas as pd
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from regime_engine import split_by_regime
 from features import get_feature_columns
+from meta_model import MetaDecisionModel
 
-def train_models(df):
-    y = df['Target_3m']
+
+def train_regime_models(df_feat: pd.DataFrame):
+    regimes = split_by_regime(df_feat)
+    models = {}
+
+    feature_cols = get_feature_columns(df_feat)
+
+    for name, dreg in regimes.items():
+        if len(dreg) < 1000:
+            continue
+
+        X = dreg[feature_cols]
+        y = dreg['Target_3m']
+
+        xgb = XGBClassifier(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            objective='binary:logistic',
+            eval_metric='logloss'
+        )
+
+        lgb = LGBMClassifier(
+            n_estimators=200,
+            max_depth=-1,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            objective='binary'
+        )
+
+        xgb.fit(X, y)
+        lgb.fit(X, y)
+
+        models[name] = {'xgb': xgb, 'lgb': lgb}
+
+        joblib.dump(xgb, f"models/xgb_{name}.bin")
+        joblib.dump(lgb, f"models/lgb_{name}.bin")
+
+    return models
+
+
+def add_ai_prob(df_feat: pd.DataFrame, models: dict) -> pd.DataFrame:
+    df = df_feat.copy()
     feature_cols = get_feature_columns(df)
-    X = df[feature_cols]
 
-    split = int(len(df) * 0.8)
-    X_train, X_test = X.iloc[:split], X.iloc[split:]
-    y_train, y_test = y.iloc[:split], y.iloc[split:]
+    ai_probs = []
 
-    xgb_model = xgb.XGBClassifier(
-        n_estimators=400,
-        max_depth=5,
-        learning_rate=0.02,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        eval_metric='logloss'
-    )
-    xgb_model.fit(X_train, y_train)
+    for idx, row in df.iterrows():
+        regime = row['Regime']
+        if regime == 1:
+            key = 'uptrend'
+        elif regime == -1:
+            key = 'downtrend'
+        elif regime == 0:
+            key = 'range'
+        else:
+            key = 'chaos'
 
-    lgb_model = LGBMClassifier(
-        n_estimators=400,
-        learning_rate=0.02,
-        subsample=0.8,
-        colsample_bytree=0.8
-    )
-    lgb_model.fit(X_train, y_train)
+        if key not in models:
+            ai_probs.append(0.5)
+            continue
 
-    joblib.dump(xgb_model, "models/xgb_model.bin")
-    joblib.dump(lgb_model, "models/lgb_model.bin")
+        x = row[feature_cols].values.reshape(1, -1)
+        p1 = models[key]['xgb'].predict_proba(x)[0, 1]
+        p2 = models[key]['lgb'].predict_proba(x)[0, 1]
+        ai_probs.append((p1 + p2) / 2.0)
 
-    return xgb_model, lgb_model
-
-def load_models():
-    xgb_model = joblib.load("models/xgb_model.bin")
-    lgb_model = joblib.load("models/lgb_model.bin")
-    return xgb_model, lgb_model
-
-def add_ai_prob(df, models):
-    xgb_model, lgb_model = models
-    feature_cols = get_feature_columns(df)
-    X = df[feature_cols]
-    prob_xgb = xgb_model.predict_proba(X)[:,1]
-    prob_lgb = lgb_model.predict_proba(X)[:,1]
-    df['AI_Prob'] = (prob_xgb + prob_lgb) / 2.0
+    df['AI_Prob'] = ai_probs
     return df
+
+
+def train_meta_model(df_feat: pd.DataFrame) -> MetaDecisionModel:
+    meta = MetaDecisionModel()
+    meta.fit(df_feat)
+    meta.save("models/meta_model.bin")
+    return meta
+
+
+def load_meta_model() -> MetaDecisionModel:
+    meta = MetaDecisionModel()
+    meta.load("models/meta_model.bin")
+    return meta
