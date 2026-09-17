@@ -107,14 +107,14 @@ def run_trading_bot(
         raise ValueError("history_df must contain at least one candle")
 
     last_candle_time = candle_history.index.max()
-    last_data_at = datetime.datetime.now(datetime.UTC)
+    last_data_at = datetime.datetime.now(datetime.timezone.utc)
 
     while not STOP_EVENT.is_set():
         if max_iterations is not None and iterations >= max_iterations:
             break
         iterations += 1
 
-        now = datetime.datetime.now(datetime.UTC)
+        now = datetime.datetime.now(datetime.timezone.utc)
         equity = float(equity_fn())
         risk_engine.update(equity)
         trading_date = now.astimezone(MARKET_TZ).date().isoformat()

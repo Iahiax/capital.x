@@ -199,9 +199,9 @@ def test_backtest_prefers_stop_when_both_levels_hit_and_skips_overlap():
 
 
 def test_schedule_and_capital_allocation_guards():
-    saturday = datetime.datetime(2024, 1, 6, 12, tzinfo=datetime.UTC)
+    saturday = datetime.datetime(2024, 1, 6, 12, tzinfo=datetime.timezone.utc)
     friday_late = datetime.datetime(
-        2024, 1, 5, 22, 30, tzinfo=datetime.UTC
+        2024, 1, 5, 22, 30, tzinfo=datetime.timezone.utc
     )
     assert is_market_closed(saturday)
     assert should_stop_new_trades(saturday)

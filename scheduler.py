@@ -13,7 +13,7 @@ from config import (
 
 def _market_time(now: datetime.datetime) -> datetime.datetime:
     if now.tzinfo is None:
-        now = now.replace(tzinfo=datetime.UTC)
+        now = now.replace(tzinfo=datetime.timezone.utc)
     return now.astimezone(MARKET_TZ)
 
 
