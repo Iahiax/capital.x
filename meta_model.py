@@ -17,7 +17,7 @@ class MetaDecisionModel:
         # نموذج بسيط لكنه قوي جداً في دمج الإشارات
         self.model = LogisticRegression(max_iter=500)
 
-    def fit(self, df):
+    def fit(self, df, target_column="Target_3m"):
         """
         تدريب النموذج على بيانات الميزات النهائية.
         df يجب أن يحتوي على:
@@ -28,9 +28,8 @@ class MetaDecisionModel:
         - Target_3m
         """
 
-        df = df.replace([np.inf, -np.inf], np.nan).dropna(
-            subset=["AI_Prob", "Regime", "MarketQuality", "Target_3m"]
-        )
+        required = ["AI_Prob", "Regime", "MarketQuality", target_column]
+        df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=required)
         if df.empty:
             raise ValueError("Meta model has no complete training rows.")
 
@@ -45,7 +44,7 @@ class MetaDecisionModel:
             df['MarketQuality'].values
         ])
 
-        y = df['Target_3m'].astype(int).values
+        y = df[target_column].astype(int).values
 
         if np.unique(y).size < 2:
             raise ValueError("Meta model needs both positive and negative targets.")
