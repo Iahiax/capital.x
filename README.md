@@ -7,7 +7,7 @@ Capital.com session flow (`POST /api/v1/session`) and sends both `CST` and
 The project is research-first. The live trading loop is not a substitute for
 broker-side validation, paper-trading, or independent risk controls.
 
-## Quick Start (Run with `python main.py`)
+## Quick Start (Continuous Autonomous Trading Engine)
 
 The project runs directly out of the box with zero configuration:
 
@@ -15,12 +15,48 @@ The project runs directly out of the box with zero configuration:
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Run the quantitative pipeline
+# 2. Run the continuous trading engine (Default 24/7 mode)
 python main.py
 ```
 
-- When run without Capital.com API credentials, `python main.py` automatically runs in **Autonomous Simulation Mode** using realistic deterministic EUR/USD M1 candles.
-- If Capital.com credentials (`CAPITAL_API_KEY`, `CAPITAL_IDENTIFIER`, `CAPITAL_API_PASSWORD`) are configured in your `.env`, it will connect to the broker.
+### Modes of Operation
+
+1. **Continuous Autonomous Paper-Trading (Default without credentials)**:
+   - If no Capital.com credentials are set in `.env`, the engine starts an active continuous simulated trading loop with a real-time candle feed.
+   - Accurately tracks positions, stops (SL), targets (TP), and account equity.
+   - Continuously monitors AI decisions and prints live cycle status directly in the terminal.
+
+2. **Continuous Live / Demo Broker Trading**:
+   - Add your Capital.com credentials (`CAPITAL_API_KEY`, `CAPITAL_IDENTIFIER`, `CAPITAL_API_PASSWORD`) into `.env`.
+   - Set `CAPITAL_USE_DEMO=true` for Demo account or `false` for Live account.
+   - Run `python main.py` to stream live market candles and execute orders directly.
+
+3. **Autonomous AI Self-Retraining Engine**:
+   - **Market Drift Trigger**: When market conditions diverge and feature drift exceeds thresholds, the system automatically recalibrates and retrains both Regime models and Meta-models on rolling data in memory without interrupting execution.
+   - **Scheduled Rolling Retraining**: Autonomously retrains periodically (every 120–180 candles) to adapt to shifting volatility and liquidity regimes.
+
+4. **One-Shot Quantitative Research & Backtesting Pipeline**:
+   - To run backtesting, walk-forward validation, Optuna hyperparameter optimization, and Monte Carlo stress tests instead of the live engine:
+   ```bash
+   python main.py --research
+   ```
+
+### VPS Deployment Guide
+
+To deploy or update on your VPS server:
+
+```bash
+cd ~/capital.x
+git pull
+python main.py
+```
+- The process will run continuously 24/7.
+- Press `Ctrl + C` to stop safely.
+- To run continuously in the background on VPS:
+  ```bash
+  nohup python main.py > trading.log 2>&1 &
+  ```
+  Or use a `systemd` service / `tmux` session.
 
 ### Tested & Validated Bug Fixes
 All 8 critical issues identified in the code audit have been resolved and verified:
