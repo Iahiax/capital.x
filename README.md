@@ -85,6 +85,27 @@ fold has enough data. `Target_3m`, `Target_15m`, `Target_60m`, and a
 cost-aware 3-minute label are retained for future multi-horizon experiments;
 only `Target_3m` currently drives the production classifier.
 
+### Multi-horizon research pass
+
+Run the separate chronological comparison with:
+
+```bash
+python main.py --sample --trials 1 --monte-carlo 0 --multi-horizon
+```
+
+The command writes `reports/multi_horizon_report.json` and
+`reports/multi_horizon_report.csv` with aggregate and per-window Brier score,
+probabilistic Sharpe, maximum drawdown, and cost-adjusted P&L for the 3-minute,
+15-minute, and 60-minute targets. Each candidate uses a purge/embargo equal
+to its label horizon and the same cost-aware paper-trading gate as the
+production walk-forward check.
+
+This is research-only. Non-3-minute model persistence is rejected unless an
+explicit persistence gate is supplied, and the live strategy target remains
+`Target_3m` even when a longer horizon passes the report gate. A passing
+longer-horizon report is evidence for a separate review; it does not promote
+that horizon into live decisions.
+
 ## Continuous service
 
 For a network-free continuous workflow check:
