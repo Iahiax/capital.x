@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import pandas as pd
 
 from drift_monitor import feature_drift
@@ -13,6 +14,8 @@ from model import (
     train_regime_models,
 )
 from signals import generate_signals
+
+logger = logging.getLogger(__name__)
 
 AI_STATE = {
     "regime_models": None,
@@ -40,6 +43,34 @@ def init_ai_model(history_df: pd.DataFrame) -> None:
     AI_STATE["candles_df"] = history_df.copy()
     AI_STATE["reference_features_df"] = df_feat.copy()
     AI_STATE["drift_status"] = {}
+
+
+def retrain_ai_model(candles_df: pd.DataFrame, max_lookback: int = 10_000) -> dict:
+    """
+    Autonomously retrains AI regime models and meta-model on rolling market data.
+    Recalibrates features, updates model weights in memory, and resets drift tracking.
+    """
+    recent_candles = candles_df.tail(max_lookback).copy()
+    logger.info("🧠 [AUTONOMOUS RETRAINING] Retraining AI models on %d candles...", len(recent_candles))
+
+    df_feat = create_pro_features(recent_candles)
+    oof_predictions = generate_oof_ai_prob(df_feat)
+    regime_models = train_regime_models(df_feat, persist=False)
+    df_feat = add_ai_prob(df_feat, regime_models)
+    meta_model = train_meta_model(df_feat, oof_predictions, persist=False)
+
+    AI_STATE["regime_models"] = regime_models
+    AI_STATE["meta_model"] = meta_model
+    AI_STATE["features_df"] = df_feat
+    AI_STATE["candles_df"] = candles_df.copy()
+    AI_STATE["reference_features_df"] = df_feat.copy()
+    AI_STATE["drift_status"] = {}
+
+    logger.info("✓ [AUTONOMOUS RETRAINING] AI models successfully retrained and live in memory.")
+    return {
+        "status": "success",
+        "candles_count": len(recent_candles),
+    }
 
 
 def refresh_ai_features(candles_df: pd.DataFrame) -> pd.DataFrame:

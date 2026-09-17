@@ -352,6 +352,11 @@ if __name__ == "__main__":
         help="Number of Optuna trials (use 1 or 2 for a quick test).",
     )
     parser.add_argument(
+        "--research",
+        action="store_true",
+        help="Run the one-shot backtesting & quantitative research pipeline and exit.",
+    )
+    parser.add_argument(
         "--live-bot",
         action="store_true",
         help="Run the live trading bot controlled via Telegram instead of the research pipeline.",
@@ -359,7 +364,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--service",
         action="store_true",
-        help="Run the continuous trading service instead of the one-shot research pipeline.",
+        help="Run the continuous trading service with autonomous self-retraining (Default).",
     )
     parser.add_argument(
         "--service-mode",
@@ -390,18 +395,15 @@ if __name__ == "__main__":
     if not sample_mode and not has_credentials:
         logger.info(
             "\n" + "=" * 66 + "\n"
-            " Capital.X Quantitative Research & Algorithmic Engine\n"
-            " [INFO] No Capital.com API credentials found in environment.\n"
-            " Launching full quantitative pipeline in Autonomous Simulation Mode...\n"
+            " Capital.X Continuous Algorithmic Engine\n"
+            " [INFO] Running in Autonomous Simulation Mode with Self-Retraining.\n"
+            " Set CAPITAL_API_KEY, CAPITAL_IDENTIFIER, and CAPITAL_API_PASSWORD in .env\n"
+            " to connect directly to Capital.com live/demo broker.\n"
             + "=" * 66 + "\n"
         )
         sample_mode = True
 
-    if args.service:
-        run_continuous_service(mode=args.service_mode, sample=sample_mode)
-    elif args.live_bot:
-        telegram_main()
-    else:
+    if args.research:
         if args.trials < 1:
             parser.error("--trials must be at least 1")
         if args.monte_carlo < 0:
@@ -412,3 +414,7 @@ if __name__ == "__main__":
             monte_carlo_simulations=args.monte_carlo,
             multi_horizon=args.multi_horizon,
         )
+    elif args.live_bot:
+        telegram_main()
+    else:
+        run_continuous_service(mode=args.service_mode, sample=sample_mode)

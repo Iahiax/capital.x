@@ -27,23 +27,38 @@ def _install_signal_handlers() -> None:
     signal.signal(signal.SIGINT, stop_handler)
 
 
-def run_sample_service(poll_seconds: int = 30) -> None:
-    """Keep a local, network-free process alive for workflow verification."""
+def run_sample_service(poll_seconds: int = 5) -> None:
+    """Run an active, continuous simulated trading loop with autonomous self-retraining."""
+
+    from broker_client import SimulatedLiveBroker
 
     _install_signal_handlers()
-    sample = generate_sample_data(1_000)
-    logger.info("Sample service started with %d local candles.", len(sample))
-    while not SERVICE_STOP.is_set():
-        logger.info("Sample service heartbeat; no broker orders are possible.")
-        SERVICE_STOP.wait(poll_seconds)
-    logger.info("Sample service stopped.")
+    sample = generate_sample_data(2_500)
+    logger.info("=" * 66)
+    logger.info("  CAPITAL.X CONTINUOUS AUTONOMOUS PAPER-TRADING SERVICE")
+    logger.info("  Self-Training: ACTIVE (Retrains on Drift & Rolling Windows)")
+    logger.info("  Simulated Market Feed: ACTIVE (Real-time Candle Simulation)")
+    logger.info("  Press Ctrl+C to stop.")
+    logger.info("=" * 66)
+
+    broker = SimulatedLiveBroker(initial_equity=config.INITIAL_EQUITY)
+    try:
+        run_trading_bot(
+            history_df=sample,
+            broker=broker,
+            poll_seconds=poll_seconds,
+            auto_retrain=True,
+            retrain_interval_candles=60,
+        )
+    finally:
+        request_stop()
 
 
 def run_continuous_service(mode: str = "DEMO", sample: bool = False) -> None:
-    """Run the broker-backed loop continuously, or a safe local service."""
+    """Run the broker-backed loop continuously, or an active simulated service."""
 
     if sample:
-        run_sample_service()
+        run_sample_service(poll_seconds=5)
         return
 
     _install_signal_handlers()
@@ -63,6 +78,10 @@ def run_continuous_service(mode: str = "DEMO", sample: bool = False) -> None:
         validate_live_readiness(validation)
 
     try:
-        run_trading_bot(history_df=history)
+        run_trading_bot(
+            history_df=history,
+            auto_retrain=True,
+            retrain_interval_candles=180,
+        )
     finally:
         request_stop()

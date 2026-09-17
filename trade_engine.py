@@ -26,6 +26,7 @@ from strategy import (
     get_drift_status,
     init_ai_model,
     refresh_ai_features,
+    retrain_ai_model,
 )
 from trade_store import TradeStore
 
@@ -59,14 +60,16 @@ def run_trading_bot(
     poll_seconds: int = 60,
     stale_after_seconds: int = 90,
     store_path: str = "trading_state.sqlite3",
-    equity_fn=lambda: INITIAL_EQUITY,
+    equity_fn=None,
     *,
     broker=None,
     poll_interval: float | None = None,
     candle_lookback_minutes: int = LIVE_CANDLE_LOOKBACK_MINUTES,
     max_iterations: int | None = None,
+    auto_retrain: bool = True,
+    retrain_interval_candles: int = 120,
 ):
-    """Run live trading, making decisions only after a newer candle arrives.
+    """Run live continuous trading with autonomous self-retraining and risk governance.
 
     ``refresh_fn`` is retained for callers that provide their own market-data
     loader. When omitted, the authenticated broker session fetches recent
@@ -75,11 +78,22 @@ def run_trading_bot(
 
     STOP_EVENT.clear()
     broker = broker or BrokerClient()
+    if equity_fn is None:
+        if hasattr(broker, "equity"):
+            equity_fn = lambda: float(getattr(broker, "equity"))
+        else:
+            equity_fn = lambda: INITIAL_EQUITY
+
+    if hasattr(broker, "_current_price"):
+        # Simulated broker does not experience network stale timeouts
+        stale_after_seconds = max(stale_after_seconds, 86_400)
+
     store = TradeStore(store_path)
     wait_seconds = poll_seconds if poll_interval is None else poll_interval
     risk_engine = RiskEngine(MAX_DAILY_DD, MAX_TOTAL_DD)
     processed_signals: set[str] = set()
     iterations = 0
+    candles_since_retrain = 0
 
     if history_df is not None:
         initialize_ai_strategy(history_df)
@@ -122,6 +136,7 @@ def run_trading_bot(
                     last_candle_time = newest_candle_time
                     last_data_at = now
                     has_new_candle = True
+                    candles_since_retrain += 1
         except (RuntimeError, TypeError, ValueError, OSError) as exc:
             logger.error("Live data refresh failed: %s", exc)
 
@@ -149,10 +164,31 @@ def run_trading_bot(
 
         drift = get_drift_status()
         severe_drift = {name: value for name, value in drift.items() if value > 0.40}
-        if severe_drift:
+        if severe_drift and auto_retrain:
+            logger.warning(
+                "⚠️ [MARKET DRIFT DETECTED] Drift in %s. Launching autonomous self-retraining on rolling window...",
+                list(severe_drift.keys())[:3],
+            )
+            try:
+                retrain_ai_model(candle_history)
+                candles_since_retrain = 0
+            except Exception as exc:
+                logger.error("Autonomous retraining failed on drift: %s", exc)
+        elif severe_drift:
             logger.critical("Severe feature drift detected: %s", severe_drift)
             STOP_EVENT.wait(wait_seconds)
             continue
+
+        if auto_retrain and candles_since_retrain >= retrain_interval_candles:
+            logger.info(
+                "⏰ [SCHEDULED RETRAINING] Reached %d new candles. Autonomously updating AI models...",
+                candles_since_retrain,
+            )
+            try:
+                retrain_ai_model(candle_history)
+                candles_since_retrain = 0
+            except Exception as exc:
+                logger.error("Periodic autonomous retraining failed: %s", exc)
 
         if should_stop_new_trades(now):
             logger.info("Market schedule blocks new trades.")
@@ -165,6 +201,15 @@ def run_trading_bot(
 
         signal, meta = generate_signal()
         store.record_decision(signal, meta)
+        curr_price = float(candle_history["Close"].iloc[-1])
+        logger.info(
+            "📊 [CYCLE #%d] Price: %.5f | Equity: $%.2f | Positions: %d | Decision: %s",
+            iterations,
+            curr_price,
+            equity,
+            len(positions),
+            "Watching" if not signal else f"⚡ {signal} SIGNAL",
+        )
         risk_allowed = risk_engine.can_trade(equity_today_start, equity)
         environment_safe = (
             has_new_candle
