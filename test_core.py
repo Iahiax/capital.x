@@ -19,6 +19,7 @@ from trade_store import TradeStore
 from walk_forward import (
     probabilistic_sharpe_ratio,
     run_ablation_report,
+    validate_multi_horizon_forecasts,
     walk_forward,
 )
 
@@ -106,6 +107,55 @@ def test_ablation_report_has_shared_windows_and_required_metrics(tmp_path):
         assert len(summary["windows"]) == report["window_count"]
     assert (tmp_path / "ablation_report.json").exists()
     assert (tmp_path / "ablation_report.csv").exists()
+
+
+def test_multi_horizon_report_is_research_only_and_cost_aware(tmp_path):
+    report = validate_multi_horizon_forecasts(
+        generate_sample_data(2_000),
+        train_window="8h",
+        test_window="4h",
+        min_successive_windows=1,
+        report_dir=tmp_path,
+    )
+
+    assert report["research_only"] is True
+    assert report["live_decision_target"] == "Target_3m"
+    assert set(report["horizons"]) == {"3m", "15m", "60m"}
+    for _horizon, result in report["horizons"].items():
+        metrics = result["aggregate"]
+        assert {
+            "brier_score",
+            "probabilistic_sharpe",
+            "max_drawdown",
+            "cost_adjusted_pnl",
+        }.issubset(metrics)
+        assert {
+            "passed",
+            "aggregate_passed",
+            "consecutive_passes",
+            "min_successive_windows",
+        }.issubset(result["paper_trading_gate"])
+    assert report["horizons"]["3m"]["live_decision_allowed"] is True
+    assert report["horizons"]["15m"]["live_decision_allowed"] is False
+    assert report["horizons"]["60m"]["live_decision_allowed"] is False
+    assert (tmp_path / "multi_horizon_report.json").exists()
+    assert (tmp_path / "multi_horizon_report.csv").exists()
+
+
+def test_non_default_horizon_cannot_persist_without_gate():
+    features = create_pro_features(generate_sample_data(400))
+    try:
+        from model import train_regime_models
+
+        train_regime_models(
+            features,
+            persist=True,
+            target_column="Target_15m",
+        )
+    except ValueError as exc:
+        assert "research-only" in str(exc)
+    else:
+        raise AssertionError("15m persistence should require an explicit gate")
 
 
 def test_backtest_prefers_stop_when_both_levels_hit_and_skips_overlap():
