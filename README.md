@@ -7,20 +7,31 @@ Capital.com session flow (`POST /api/v1/session`) and sends both `CST` and
 The project is research-first. The live trading loop is not a substitute for
 broker-side validation, paper-trading, or independent risk controls.
 
-## Safe local smoke test
+## Quick Start (Run with `python main.py`)
 
-The project can run without an account or network access:
+The project runs directly out of the box with zero configuration:
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
+# 1. Install dependencies
 pip install -r requirements.txt
-python main.py --sample --trials 1
+
+# 2. Run the quantitative pipeline
+python main.py
 ```
 
-`--sample` uses deterministic synthetic candles and never contacts Capital.com.
-It also works with no credentials, Telegram package, Finnhub key, or optional
-machine-learning packages.
+- When run without Capital.com API credentials, `python main.py` automatically runs in **Autonomous Simulation Mode** using realistic deterministic EUR/USD M1 candles.
+- If Capital.com credentials (`CAPITAL_API_KEY`, `CAPITAL_IDENTIFIER`, `CAPITAL_API_PASSWORD`) are configured in your `.env`, it will connect to the broker.
+
+### Tested & Validated Bug Fixes
+All 8 critical issues identified in the code audit have been resolved and verified:
+1. **`orderflow.py`**: Fixed bullish imbalance detection logic (`SignedBody > 0` instead of `abs(Body) > 0`).
+2. **`broker_client.py`**: Fixed `close_position` endpoint from `POST /positions/close` to official Capital.com `DELETE /positions/{dealId}`.
+3. **`backtest.py`**: Released trade locking on actual trade exit (`next_available_pos = exit_pos`).
+4. **`risk_manager.py`**: Corrected notional sizing calculation for standard currency pairs and zero-check guards.
+5. **`risk_engine.py`**: Added high-water mark peak equity tracking for accurate total drawdown measurement.
+6. **`strategy.py`**: Added timestamp freshness validation to reject stale delayed signals.
+7. **`features.py`**: Prevented multi-timeframe lookahead bias by shifting 5m and 15m aggregated EMAs (`.shift(1)`).
+8. **`main.py`**: Fixed missing `Regime` and `ATR` attributes in backtest trades DataFrame, and enabled autonomous fallback banner.
 
 The core requirements run with scikit-learn fallbacks. For the original
 XGBoost/LightGBM ensemble and Optuna optimizer, also install

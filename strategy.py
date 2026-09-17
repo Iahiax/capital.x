@@ -81,6 +81,10 @@ def generate_signal() -> tuple[str | None, dict]:
         return None, {"rejection_counts": AI_STATE["last_audit"]}
 
     signal_row = signals_df.iloc[-1]
+    latest_candle_time = df_feat.index[-1]
+    if pd.Timestamp(signal_row["Time"]) != pd.Timestamp(latest_candle_time):
+        return None, {"rejection_counts": AI_STATE["last_audit"], "status": "stale_signal"}
+
     signal_type = "BUY" if signal_row["Type"] == "LONG" else "SELL"
     score = signal_row.get("Score", 0.0)
     atr = signal_row.get("ATR", 0.001)

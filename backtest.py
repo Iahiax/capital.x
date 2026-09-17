@@ -156,10 +156,11 @@ def run_backtest(
         exit_price = None
         exit_reason = "TIMEOUT"
         exit_time = None
+        exit_pos = entry_pos + max(len(future), 1)
         atr = float(t.get("ATR", 0.0) or 0.0)
         slippage = max(0.0, atr * slippage_atr_multiplier)
 
-        for bar_time, bar in future.iterrows():
+        for offset, (bar_time, bar) in enumerate(future.iterrows(), start=1):
             high = bar['High']
             low = bar['Low']
             if t['Type'] == 'LONG':
@@ -167,30 +168,36 @@ def run_backtest(
                     exit_price = entry_price - sl
                     exit_reason = "SL"
                     exit_time = bar_time
+                    exit_pos = entry_pos + offset
                     break
                 if high >= entry_price + tp:
                     exit_price = entry_price + tp
                     exit_reason = "TP"
                     exit_time = bar_time
+                    exit_pos = entry_pos + offset
                     break
             else:
                 if high >= entry_price + sl:
                     exit_price = entry_price + sl
                     exit_reason = "SL"
                     exit_time = bar_time
+                    exit_pos = entry_pos + offset
                     break
                 if low <= entry_price - tp:
                     exit_price = entry_price - tp
                     exit_reason = "TP"
                     exit_time = bar_time
+                    exit_pos = entry_pos + offset
                     break
 
         if exit_price is None and not future.empty:
             exit_price = float(future.iloc[-1]["Close"])
             exit_time = future.index[-1]
+            exit_pos = entry_pos + len(future)
         if exit_price is None:
             exit_price = float(entry_price)
             exit_time = pd.Timestamp(entry_time)
+            exit_pos = entry_pos + 1
 
         direction = 1 if t["Type"] == "LONG" else -1
         gross_profit = (exit_price - entry_price) * size * direction
@@ -218,7 +225,7 @@ def run_backtest(
         trades_df.at[i, "SwapCost"] = swap_cost
         trades_df.at[i, "TotalCosts"] = total_cost
         executed_trades += 1
-        next_available_pos = entry_pos + max(len(future), 1)
+        next_available_pos = exit_pos
 
         equity += profit
         equity_curve.append(equity)

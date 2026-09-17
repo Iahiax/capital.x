@@ -30,7 +30,7 @@ def add_orderflow_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # ضغط شراء/بيع تقريبي
     df['AggressiveBuy'] = (
-        (df['Body'] > 0) &
+        (df['SignedBody'] > 0) &
         (df['UpperWick'] < df['LowerWick'])
     ).astype(int)
 

@@ -8,3 +8,4 @@ models/*.bin
 *.sqlite3
 *.log
 .ruff_cache/
+reports/

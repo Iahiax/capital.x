@@ -90,13 +90,11 @@ class BrokerClient:
             return None
 
     def close_position(self, deal_id: str) -> dict | None:
-        url = f"{config.get_base_url()}/positions/close"
-        body = {"dealId": deal_id, "size": "ALL"}
+        url = f"{config.get_base_url()}/positions/{deal_id}"
         try:
-            response = requests.post(
+            response = requests.delete(
                 url,
                 headers=self._headers(),
-                json=body,
                 timeout=config.REQUEST_TIMEOUT,
             )
             response.raise_for_status()

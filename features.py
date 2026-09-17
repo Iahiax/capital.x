@@ -52,8 +52,8 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
     df_5m['EMA_5m_20'] = df_5m['close'].ewm(span=20).mean()
     df_15m['EMA_15m_20'] = df_15m['close'].ewm(span=20).mean()
 
-    df_5m = df_5m[['EMA_5m_20']]
-    df_15m = df_15m[['EMA_15m_20']]
+    df_5m = df_5m[['EMA_5m_20']].shift(1)
+    df_15m = df_15m[['EMA_15m_20']].shift(1)
 
     df = pd.merge_asof(
         df.sort_index(), df_5m.sort_index(),

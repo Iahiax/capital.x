@@ -27,7 +27,7 @@ def calculate_position_size(
     pip_value: قيمة النقطة الواحدة
     """
 
-    if stop_pips <= 0:
+    if stop_pips <= 0 or pip_value <= 0 or equity <= 0:
         return 0.0
 
     # المبلغ المعرض للخطر في هذه الصفقة
@@ -42,8 +42,8 @@ def calculate_position_size(
     # تقريبًا: الخسارة ≈ stop_pips * pip_value * units
     units = effective_risk_amount / (stop_pips * pip_value)
 
-    # القيمة الاسمية التقريبية
-    notional = units * pip_value * 100000  # تقريب تقريبي
+    # القيمة الاسمية التقريبية (بالدولار لعقد زوج العملة الرئيسي كالـ EUR/USD)
+    notional = units
 
     # الحد الأقصى للقيمة الاسمية حسب الرافعة
     max_notional = equity * LEVERAGE
