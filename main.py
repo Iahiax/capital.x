@@ -35,7 +35,11 @@ from service import run_continuous_service
 from signals import generate_signals
 from strategy import init_ai_model
 from trade_engine import get_live_status, run_trading_bot
-from walk_forward import run_ablation_report, validate_strategy_walk_forward
+from walk_forward import (
+    run_ablation_report,
+    validate_multi_horizon_forecasts,
+    validate_strategy_walk_forward,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +57,12 @@ DEFAULT_SIGNAL_PARAMETERS = {
 # 1) البحث التداولي (Pipeline)
 # =========================
 
-def research_main(sample: bool = False, trials: int = 5, monte_carlo_simulations: int = 1000):
+def research_main(
+    sample: bool = False,
+    trials: int = 5,
+    monte_carlo_simulations: int = 1000,
+    multi_horizon: bool = False,
+):
     """
     تشغيل بايبلاين البحث التداولي:
     - توليد أو تحميل البيانات
@@ -69,6 +78,32 @@ def research_main(sample: bool = False, trials: int = 5, monte_carlo_simulations
     """
     df = generate_sample_data() if sample else load_full_year_data()
     df_feat = create_pro_features(df)
+    if multi_horizon:
+        comparison_train_window = "8h" if sample else f"{WALK_FORWARD_TRAIN_DAYS}D"
+        comparison_test_window = "4h" if sample else f"{WALK_FORWARD_TEST_DAYS}D"
+        horizon_report = validate_multi_horizon_forecasts(
+            df,
+            train_window=comparison_train_window,
+            test_window=comparison_test_window,
+            report_dir=Path(__file__).resolve().parent / "reports",
+        )
+        for horizon, result in horizon_report["horizons"].items():
+            metrics = result["aggregate"]
+            logger.info(
+                "Multi-horizon %s: Brier=%.5f, PSR=%.3f, drawdown=%.2f, "
+                "cost-adjusted P&L=%.2f, paper_gate=%s",
+                horizon,
+                metrics["brier_score"] or float("nan"),
+                metrics["probabilistic_sharpe"],
+                metrics["max_drawdown"],
+                metrics["cost_adjusted_pnl"],
+                result["paper_trading_gate"]["passed"],
+            )
+        logger.info(
+            "Multi-horizon report written to %s; live target remains %s.",
+            horizon_report.get("report_files", {}).get("json", "memory only"),
+            horizon_report["live_decision_target"],
+        )
     split = max(int(len(df_feat) * 0.7), 1)
     adversarial = adversarial_validation(df_feat.iloc[:split], df_feat.iloc[split:])
     logger.info("Adversarial validation: %s", adversarial)
@@ -315,6 +350,14 @@ if __name__ == "__main__":
         default=1000,
         help="Number of trade-order Monte Carlo simulations (0 disables it).",
     )
+    parser.add_argument(
+        "--multi-horizon",
+        action="store_true",
+        help=(
+            "Run the research-only 3m/15m/60m walk-forward comparison; "
+            "never changes the live target."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -331,4 +374,5 @@ if __name__ == "__main__":
             sample=args.sample,
             trials=args.trials,
             monte_carlo_simulations=args.monte_carlo,
+            multi_horizon=args.multi_horizon,
         )
